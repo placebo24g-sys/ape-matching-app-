@@ -21,7 +21,7 @@
   <header class="bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md">
     <div class="max-w-3xl mx-auto px-4 py-6 text-center">
       <h1 class="text-2xl md:text-3xl font-bold tracking-wide flex items-center justify-center gap-2">
-        <i class="fa-solid font-award fa-paw"></i> 類人猿タイプ診断
+        <i class="fa-solid fa-paw"></i> 類人猿タイプ診断
       </h1>
       <p class="text-emerald-100 text-sm mt-1">12の質問であなたの行動特性とチームでの役割を分析します</p>
     </div>
@@ -125,9 +125,14 @@
         </div>
       </div>
 
-      <!-- アクションボタン -->
-      <div class="text-center">
-        <button id="btn-restart" class="px-8 py-3 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl shadow-md transition-all duration-200">
+      <!-- アクションボタン群 -->
+      <div class="flex flex-col md:flex-row gap-4 justify-center items-center">
+        <!-- マッチング・食事会予約ボタン -->
+        <button id="btn-next-step" onclick="alert('マッチング食事会の予約ページへ進みます（実装予定）')" class="w-full md:w-auto px-8 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all duration-200">
+          <i class="fa-solid fa-calendar-check mr-2"></i> 食事会マッチングを予約する
+        </button>
+        <!-- 再診断ボタン -->
+        <button id="btn-restart" class="w-full md:w-auto px-6 py-3.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all duration-200">
           <i class="fa-solid fa-rotate-right mr-2"></i> もう一度診断する
         </button>
       </div>
@@ -143,8 +148,8 @@
   <!-- スクリプト -->
   <script>
     document.addEventListener('DOMContentLoaded', () => {
-      // API 設定 (FastAPI等)
-      const API_URL = 'http://127.0.0.1:8000/api/ape-profiles';
+      // API 設定（Render本番環境）
+      const API_URL = 'https://ape-matching-api.onrender.com/api/ape-profiles';
 
       // 質問データ（12問）
       const questions = [
@@ -255,7 +260,7 @@
           { label: labelB, value: valueB }
         ];
 
-        options.forEach((opt, idx) => {
+        options.forEach((opt) => {
           const isSelected = userAnswers[currentIndex] === opt.value;
           const optionEl = document.createElement('label');
           optionEl.className = `flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 ${
@@ -271,7 +276,7 @@
 
           optionEl.addEventListener('click', () => {
             userAnswers[currentIndex] = opt.value;
-            renderQuestion(); // 再描画して選択状態を反映
+            renderQuestion();
           });
 
           optionsContainer.appendChild(optionEl);
@@ -318,11 +323,6 @@
           if (ans === 'G') scoreG++;
         });
 
-        // 各タイプヘの重み付けプロファイル計算
-        // E × A => チンパンジー
-        // E × G => ボノボ
-        // I × G => ゴリラ
-        // I × A => オランウータン
         const chimpanzeeScore = scoreE + scoreA;
         const bonoboScore = scoreE + scoreG;
         const gorillaScore = scoreI + scoreG;
@@ -337,7 +337,6 @@
           ORANGUTAN: Math.round((orangutanScore / totalPoints) * 100)
         };
 
-        // 判定ルール (メジャータイプ決定)
         const isE = scoreE >= scoreI;
         const isA = scoreA >= scoreG;
 
@@ -363,7 +362,6 @@
         const result = calculateScores();
         const mainTypeInfo = typeMaster[result.primaryType];
 
-        // 画面の反映
         document.getElementById('result-type-name').textContent = mainTypeInfo.name;
         document.getElementById('result-catchphrase').textContent = mainTypeInfo.catchphrase;
         document.getElementById('result-description').textContent = mainTypeInfo.description;
@@ -374,7 +372,6 @@
         document.getElementById('axis-a-g').textContent = 
           result.scoreA > result.scoreG ? `成果指向型 (A: ${result.scoreA}pt)` : `安寧・調和型 (G: ${result.scoreG}pt)`;
 
-        // スコアプログレスバー群のレンダリング
         const breakdownContainer = document.getElementById('score-breakdown');
         breakdownContainer.innerHTML = '';
 
@@ -396,7 +393,6 @@
           breakdownContainer.appendChild(row);
         });
 
-        // バックエンド保存処理呼び出し
         await saveResultToPythonBackend(result);
       }
 
@@ -427,12 +423,10 @@
           
           console.log('診断結果が正常にPythonサーバーへ送信されました');
         } catch (error) {
-          // サーバーが未起動の場合でも画面表示を止めないよう警告ログのみに留める
-          console.warn('APIへの保存に失敗しました（サーバー状態を確認してください）:', error.message);
+          console.warn('APIへの保存に失敗しました:', error.message);
         }
       }
 
-      // リセット
       function restartQuiz() {
         resultScreen.classList.add('hidden');
         startScreen.classList.remove('hidden');
