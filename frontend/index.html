@@ -422,3 +422,16 @@
                         </div>
                     </div>
                 `;
+                ratioContainer.insertAdjacentHTML('beforeend', barHtml);
+            });
+        }
+
+        function restartQuiz() {
+            currentQuestion = 0;
+            answers = {};
+            document.getElementById('result-screen').classList.add('hidden');
+            document.getElementById('start-screen').classList.remove('hidden');
+        }
+    </script>
+</body>
+</html>
