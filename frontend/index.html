@@ -386,12 +386,49 @@
             return { scores, highestType, extraversion: eCount, achievement: aCount };
         }
 
+        // ★ Python FastAPI バックエンドへデータを送信する関数 ★
+        async function saveResultToPythonBackend(resultData) {
+            const API_URL = 'http://127.0.0.1:8000/api/ape-profiles';
+
+            const payload = {
+                user_id: "usr_" + Math.random().toString(36).substring(2, 9),
+                primary_type: resultData.highestType,
+                score_chimpanzee: resultData.scores.chimpanzee,
+                score_bonobo: resultData.scores.bonobo,
+                score_gorilla: resultData.scores.gorilla,
+                score_orangutan: resultData.scores.orangutan,
+                extraversion_score: resultData.extraversion,
+                achievement_score: resultData.achievement
+            };
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (response.ok) {
+                    const resJson = await response.json();
+                    console.log('✅ Pythonサーバー(SQLite)へ保存成功:', resJson);
+                } else {
+                    console.error('❌ Python API エラー:', response.status);
+                }
+            } catch (error) {
+                console.warn('⚠️ Pythonサーバーとの通信に失敗しました:', error);
+            }
+        }
+
         function showResults() {
             document.getElementById('quiz-screen').classList.add('hidden');
             document.getElementById('result-screen').classList.remove('hidden');
 
-            const { scores, highestType } = calculateScores();
+            const resultData = calculateScores();
+            const { scores, highestType } = resultData;
             const mainDetail = typeDetails[highestType];
+
+            // ★ Pythonバックエンド（FastAPI）へ自動保存送信
+            saveResultToPythonBackend(resultData);
 
             const card = document.getElementById('main-result-card');
             card.className = `p-6 rounded-3xl text-center mb-6 border shadow-sm transition ${mainDetail.colorClass}`;
