@@ -151,6 +151,13 @@
       // API 設定（Render本番環境）
       const API_URL = 'https://ape-matching-api.onrender.com/api/ape-profiles';
 
+      // ユーザーIDの取得または作成（ローカルストレージに保存）
+      let userId = localStorage.getItem('ape_user_id');
+      if (!userId) {
+        userId = 'usr_' + Math.random().toString(36).substring(2, 9);
+        localStorage.setItem('ape_user_id', userId);
+      }
+
       // 質問データ（12問）
       const questions = [
         // 感情表現軸 (E: 表に出す / I: 表に出さない)
@@ -396,16 +403,18 @@
         await saveResultToPythonBackend(result);
       }
 
-      // API送信関数
+      // API送信関数（FastAPI DiagnosticResultCreate スキーマ準拠）
       async function saveResultToPythonBackend(result) {
         try {
           const payload = {
-            primary_type: result.primaryType,
-            score_e: result.scoreE,
-            score_i: result.scoreI,
-            score_a: result.scoreA,
-            score_g: result.scoreG,
-            profiles: result.profiles
+            user_id: userId,
+            primary_type: result.primaryType.toLowerCase(), // 'chimpanzee' 等に変換
+            score_chimpanzee: result.profiles.CHIMPANZEE,
+            score_bonobo: result.profiles.BONOBO,
+            score_gorilla: result.profiles.GORILLA,
+            score_orangutan: result.profiles.ORANGUTAN,
+            extraversion_score: result.scoreE,
+            achievement_score: result.scoreA
           };
 
           const response = await fetch(API_URL, {
@@ -420,7 +429,8 @@
             throw new Error(`HTTP error! status: ${response.status}`);
           }
           
-          console.log('診断結果が正常にPythonサーバーへ送信されました！');
+          const resData = await response.json();
+          console.log('診断結果が正常にPythonサーバーへ送信されました！', resData);
         } catch (error) {
           console.warn('APIへの保存に失敗しました:', error.message);
         }
