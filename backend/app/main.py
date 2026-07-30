@@ -2,7 +2,7 @@ import datetime
 import uuid
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, Depends, Status
+from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware  # ★CORS設定を追加
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, String, Integer, DateTime
