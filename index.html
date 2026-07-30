@@ -401,14 +401,11 @@
         try {
           const payload = {
             primary_type: result.primaryType,
-            scores: {
-              E: result.scoreE,
-              I: result.scoreI,
-              A: result.scoreA,
-              G: result.scoreG
-            },
-            profiles: result.profiles,
-            timestamp: new Date().toISOString()
+            score_e: result.scoreE,
+            score_i: result.scoreI,
+            score_a: result.scoreA,
+            score_g: result.scoreG,
+            profiles: result.profiles
           };
 
           const response = await fetch(API_URL, {
@@ -418,10 +415,12 @@
           });
 
           if (!response.ok) {
+            const errorDetails = await response.json().catch(() => null);
+            console.error('FastAPIバリデーションエラー詳細:', errorDetails);
             throw new Error(`HTTP error! status: ${response.status}`);
           }
           
-          console.log('診断結果が正常にPythonサーバーへ送信されました');
+          console.log('診断結果が正常にPythonサーバーへ送信されました！');
         } catch (error) {
           console.warn('APIへの保存に失敗しました:', error.message);
         }
