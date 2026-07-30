@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>本格類人猿タイプ診断 (12問版) | パーソナリティ＆マッチング</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Noto Sans JP', sans-serif;
+            background: linear-gradient(135deg, #f0f4ff 0%, #e8eefb 100%);
+            min-height: 100vh;
+        }
+        .custom-radio:checked + label {
+            border-color: #4f46e5;
+            background-color: #eeeafe;
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.15);
+        }
+        .custom-radio:checked + label .radio-dot {
+            border-color: #4f46e5;
+            background-color: #4f46e5;
+        }
+        .fade-in {
+            animation: fadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center p-4 sm:p-6">
+
+    <div id="app" class="w-full max-w-2xl bg-white rounded-3xl shadow-xl overflow-hidden border border-slate-100 relative">
+        
+        <!-- ヘッダーバー -->
+        <div class="bg-gradient-to-r from-indigo-600 to-cyan-600 p-6 text-white text-center relative overflow-hidden">
+            <div class="absolute -right-6 -top-6 w-24 h-24 bg-white/10 rounded-full blur-xl"></div>
+            <div class="absolute -left-6 -bottom-6 w-24 h-24 bg-white/10 rounded-full blur-xl"></div>
+            <span class="bg-white/20 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider mb-2 inline-block">高精度マッチング用診断</span>
+            <h1 class="text-2xl sm:text-3xl font-black tracking-tight">類人猿タイプ診断</h1>
+            <p class="text-indigo-100 text-sm mt-1">2つの軸で思考と行動パターンを12問で緻密に分析</p>
+        </div>
+
+        <!-- 診断スタート画面 -->
+        <div id="start-screen" class="p-8 text-center fade-in">
+            <div class="w-24 h-24 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6 text-4xl shadow-inner">
+                <i class="fa-solid fa-clipboard-check"></i>
+            </div>
+            <h2 class="text-xl font-bold text-slate-800 mb-3">直感で選ぶ12の質問</h2>
+            <p class="text-slate-600 text-sm leading-relaxed mb-8 max-w-md mx-auto">
+                深く考え込まず、日頃の自分に最も近いものを直感で選んでください。約2分であなたの正確な類人猿タイプとバランス比率を算出します。
+            </p>
+            
+            <div class="grid grid-cols-2 gap-3 max-w-md mx-auto mb-8 text-left text-xs text-slate-600">
+                <div class="p-3 bg-amber-50 rounded-xl border border-amber-100 flex items-center gap-2">
+                    <span class="text-lg">🐵</span> <div><strong class="text-amber-900 block">チンパンジー</strong> 勝ち気・情熱リーダー</div>
+                </div>
+                <div class="p-3 bg-rose-50 rounded-xl border border-rose-100 flex items-center gap-2">
+                    <span class="text-lg">🦧</span> <div><strong class="text-rose-900 block">ボノボ</strong> 共感・ムードメーカー</div>
+                </div>
+                <div class="p-3 bg-emerald-50 rounded-xl border border-emerald-100 flex items-center gap-2">
+                    <span class="text-lg">🦍</span> <div><strong class="text-emerald-900 block">ゴリラ</strong> 秩序・調和の気配り屋</div>
+                </div>
+                <div class="p-3 bg-blue-50 rounded-xl border border-blue-100 flex items-center gap-2">
+                    <span class="text-lg">🦧</span> <div><strong class="text-blue-900 block">オランウータン</strong> 探求・マイペース職人</div>
+                </div>
+            </div>
+
+            <button onclick="startQuiz()" class="w-full sm:w-auto px-10 py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl shadow-lg shadow-indigo-200 transition-all transform active:scale-95 text-base">
+                診断を開始する <i class="fa-solid fa-arrow-right ml-2"></i>
+            </button>
+        </div>
+
+        <!-- 質問画面 -->
+        <div id="quiz-screen" class="p-6 sm:p-8 hidden">
+            <!-- プログレスバー -->
+            <div class="mb-6">
+                <div class="flex justify-between text-xs font-bold text-slate-500 mb-2">
+                    <span id="question-number">質問 1 / 12</span>
+                    <span id="progress-percent">8%</span>
+                </div>
+                <div class="w-full bg-slate-100 h-2.5 rounded-full overflow-hidden">
+                    <div id="progress-bar" class="bg-indigo-600 h-full transition-all duration-300" style="width: 8%;"></div>
+                </div>
+            </div>
+
+            <h3 id="question-text" class="text-lg sm:text-xl font-bold text-slate-800 mb-6 leading-snug">
+                <!-- 質問本文 -->
+            </h3>
+
+            <!-- ラジオボタン選択肢 -->
+            <div id="options-container" class="space-y-3 mb-8">
+                <!-- JSで動的生成 -->
+            </div>
+
+            <!-- ボタン制御 -->
+            <div class="flex justify-between items-center pt-4 border-t border-slate-100">
+                <button id="prev-btn" onclick="prevQuestion()" class="px-5 py-2.5 text-slate-500 font-semibold hover:bg-slate-100 rounded-xl text-sm transition">
+                    <i class="fa-solid fa-arrow-left mr-1"></i> 前へ
+                </button>
+                <button id="next-btn" onclick="nextQuestion()" disabled class="px-7 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-200 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-md transition text-sm">
+                    次へ <i class="fa-solid fa-arrow-right ml-1"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- 診断結果画面 -->
+        <div id="result-screen" class="p-6 sm:p-8 hidden fade-in">
+            <div class="text-center mb-6">
+                <span class="text-xs font-bold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full uppercase">診断完了</span>
+                <h2 class="text-2xl font-black text-slate-800 mt-2">あなたの類人猿タイプ</h2>
+            </div>
+
+            <!-- メイン結果カード -->
+            <div id="main-result-card" class="p-6 rounded-3xl text-center mb-6 border shadow-sm transition">
+                <div id="result-emoji" class="text-6xl mb-2"></div>
+                <h3 id="result-type-title" class="text-2xl font-black mb-1"></h3>
+                <p id="result-catchphrase" class="text-sm font-bold opacity-80 mb-4"></p>
+                <p id="result-description" class="text-xs sm:text-sm text-slate-700 leading-relaxed text-left bg-white/70 p-4 rounded-2xl border border-white/50">
+                </p>
+            </div>
+
+            <!-- 4タイプ比率グラフ -->
+            <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 mb-6">
+                <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-3">あなたの中の4タイプ構成比率</h4>
+                <div class="space-y-3" id="ratio-bars">
+                    <!-- JS生成 -->
+                </div>
+            </div>
+
+            <!-- 食事会でのアドバイス -->
+            <div class="bg-amber-50/60 p-5 rounded-2xl border border-amber-100/80 mb-8">
+                <h4 class="text-xs font-bold text-amber-800 flex items-center gap-1.5 mb-2">
+                    <i class="fa-solid fa-utensils"></i> 食事会・合コンでのあなたの強みと立ち回り
+                </h4>
+                <p id="result-dining-advice" class="text-xs sm:text-sm text-amber-900/80 leading-relaxed">
+                </p>
+            </div>
+
+            <!-- アクションボタン -->
+            <div class="flex flex-col sm:flex-row gap-3">
+                <button onclick="restartQuiz()" class="flex-1 py-3.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm transition">
+                    <i class="fa-solid fa-rotate-right mr-1"></i> やり直す
+                </button>
+                <button onclick="alert('食事会マッチング機能へ進みます（デモ）')" class="flex-1 py-3.5 px-4 bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-700 hover:to-cyan-700 text-white font-bold rounded-xl shadow-lg shadow-indigo-100 text-sm transition">
+                    食事会マッチングを探す <i class="fa-solid fa-arrow-right ml-1"></i>
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // 12設問データ (感情表現軸 E/I : 6問, 欲求指向軸 A/G : 6問)
+        const questions = [
+            {
+                text: "Q1. 感情や嬉しさ、悔しさは表情や行動に出やすいですか？",
+                options: [
+                    { label: "顔や言葉にすぐ出やすく、周りにも伝わりやすい", axis: "E" },
+                    { label: "あまり表に出さず、平静を装うことが多い", axis: "I" }
+                ]
+            },
+            {
+                text: "Q2. グループでの会話中、発言するタイミングはどちらに近い？",
+                options: [
+                    { label: "思いついたらすぐに自分の言葉で発言する", axis: "E" },
+                    { label: "頭の中で考えを一度整理してから発言する", axis: "I" }
+                ]
+            },
+            {
+                text: "Q3. 初対面の人たちが集まる場での自分の立ち振る舞いは？",
+                options: [
+                    { label: "自分から積極的に声をかけたり場を盛り上げる", axis: "E" },
+                    { label: "まずは相手の様子や全体の雰囲気を静かに観察する", axis: "I" }
+                ]
+            },
+            {
+                text: "Q4. 良いニュースやトラブルがあった時、最初に取りがちな行動は？",
+                options: [
+                    { label: "すぐに誰かに話したり共有したくなる", axis: "E" },
+                    { label: "まずは自分一人で咀嚼・整理してから対応を考える", axis: "I" }
+                ]
+            },
+            {
+                text: "Q5. 周りから言われやすい自分の印象は？",
+                options: [
+                    { label: "「明るい」「賑やか」「何をつもりか分かりやすい」", axis: "E" },
+                    { label: "「落ち着いている」「冷静」「ポーカーフェイス」", axis: "I" }
+                ]
+            },
+            {
+                text: "Q6. 賑やかなパーティーやイベントが終わった直後の感覚は？",
+                options: [
+                    { label: "エネルギーをもらって「楽しかった！」とテンションが高い", axis: "E" },
+                    { label: "楽しかったけれど「一人の時間でリセットしたい」と感じる", axis: "I" }
+                ]
+            },
+            {
+                text: "Q7. 仕事や活動において、より大きなモチベーションになるのは？",
+                options: [
+                    { label: "具体的な成果を出すことや、勝負で勝利・評価されること", axis: "A" },
+                    { label: "みんなと良好な関係を保ち、感謝や共感を得られること", axis: "G" }
+                ]
+            },
+            {
+                text: "Q8. チーム内で意見の衝突が発生したとき、どう対応したい？",
+                options: [
+                    { label: "何が正論・合理的か、成果が出るかを重視して議論する", axis: "A" },
+                    { label: "メンバーの感情やチームの雰囲気を壊さない着地点を探す", axis: "G" }
+                ]
+            },
+            {
+                text: "Q9. 理想的な取り組みスタイルはどちらに近い？",
+                options: [
+                    { label: "自分の裁量で自由に工夫し、目標に向かって攻めるスタイル", axis: "A" },
+                    { label: "ルールや役割が明確で、互いに助け合いながら進めるスタイル", axis: "G" }
+                ]
+            },
+            {
+                text: "Q10. 人と話している時、より気になるポイントは？",
+                options: [
+                    { label: "話の結論や相手のロジック・成果・事実関係", axis: "A" },
+                    { label: "相手の感情やその場の居心地・人間関係のバランス", axis: "G" }
+                ]
+            },
+            {
+                text: "Q11. 自分にとって「失敗」と感じやすいのはどちら？",
+                options: [
+                    { label: "目標が未達成に終わったり、自分の実力を発揮できなかった時", axis: "A" },
+                    { label: "周りとの関係がギクシャクしたり、誰かを傷つけてしまった時", axis: "G" }
+                ]
+            },
+            {
+                text: "Q12. 人から褒められて一番嬉しい言葉は？",
+                options: [
+                    { label: "「すごい！優秀だね」「結果を出してさすがだね」", axis: "A" },
+                    { label: "「あなたのおかげで安心できた」「いつも気配りをありがとう」", axis: "G" }
+                ]
+            }
+        ];
+
+        const typeDetails = {
+            chimpanzee: {
+                name: "チンパンジー",
+                emoji: "🐵",
+                colorClass: "bg-amber-50 border-amber-200 text-amber-900",
+                barColor: "bg-amber-500",
+                catchphrase: "勝ち気で情熱的！目標へ突き進むリーダー",
+                description: "感情表現が豊かで、成果や勝利に対する強い情熱を持っています。決断力があり、新しいことへ積極的に挑戦するエネルギーに満ち溢れたタイプです。",
+                diningAdvice: "場をリードし盛り上げるのが得意！進行や乾杯、一次会の決断などを主導するとみんなから頼りにされます。"
+            },
+            bonobo: {
+                name: "ボノボ",
+                emoji: "🦧",
+                colorClass: "bg-rose-50 border-rose-200 text-rose-900",
+                barColor: "bg-rose-500",
+                catchphrase: "共感度100%！雰囲気を明るくするムードメーカー",
+                description: "感情豊かで人との繋がりや共感を最も大切にします。周りの気持ちを察するのが得意で、みんなが楽しめているかを優しく見守る愛されキャラです。",
+                diningAdvice: "会話を拾ったり『それわかる！』と共感する天才。緊張している初対面のメンバーを和ませる最大のキーパーソンです。"
+            },
+            gorilla: {
+                name: "ゴリラ",
+                emoji: "🦍",
+                colorClass: "bg-emerald-50 border-emerald-200 text-emerald-900",
+                barColor: "bg-emerald-500",
+                catchphrase: "平和と秩序を守る、誠実で心優しい気配り屋",
+                description: "穏やかで落ち着いており、集団の調和と平和を重んじます。ルールや礼儀を守り、周りへの細やかな気配りができるため、絶大な信頼を獲得します。",
+                diningAdvice: "注文の取りまとめや取り分けなど細やかな気配りが抜群。ゴリラタイプがいるだけで食事会全体に安心感が生まれます。"
+            },
+            orangutan: {
+                name: "オランウータン",
+                emoji: "🦧",
+                colorClass: "bg-blue-50 border-blue-200 text-blue-900",
+                barColor: "bg-blue-500",
+                catchphrase: "マイペースで理知的！独自の世界観を持つ職人肌",
+                description: "感情を表に出さず、冷静に事象を観察・分析するのが得意です。自分のペースや納得感を大切にし、深い専門知識や独自の視点を持っています。",
+                diningAdvice: "マニアックな話題やこだわりのお店の話で真価を発揮。1対1の落ち着いた会話で一気に深い信頼関係を築けます。"
+            }
+        };
+
+        let currentQuestion = 0;
+        let answers = {}; 
+
+        function startQuiz() {
+            document.getElementById('start-screen').classList.add('hidden');
+            document.getElementById('quiz-screen').classList.remove('hidden');
+            document.getElementById('quiz-screen').classList.add('fade-in');
+            renderQuestion();
+        }
+
+        function renderQuestion() {
+            const q = questions[currentQuestion];
+            document.getElementById('question-number').innerText = `質問 ${currentQuestion + 1} / ${questions.length}`;
+            
+            const percent = Math.round(((currentQuestion + 1) / questions.length) * 100);
+            document.getElementById('progress-percent').innerText = `${percent}%`;
+            document.getElementById('progress-bar').style.width = `${percent}%`;
+
+            document.getElementById('question-text').innerText = q.text;
+
+            const container = document.getElementById('options-container');
+            container.innerHTML = '';
+
+            q.options.forEach((opt, idx) => {
+                const isChecked = answers[currentQuestion] === opt.axis;
+                const optionId = `opt_${currentQuestion}_${idx}`;
+                
+                const html = `
+                    <div>
+                        <input type="radio" id="${optionId}" name="q_option" value="${opt.axis}" class="custom-radio hidden" ${isChecked ? 'checked' : ''} onchange="selectOption('${opt.axis}')">
+                        <label for="${optionId}" class="flex items-center p-4 border border-slate-200 rounded-2xl cursor-pointer hover:bg-slate-50 transition-all">
+                            <span class="radio-dot w-5 h-5 rounded-full border-2 border-slate-300 mr-3 flex-shrink-0 transition-all"></span>
+                            <span class="text-sm sm:text-base font-medium text-slate-700">${opt.label}</span>
+                        </label>
+                    </div>
+                `;
+                container.insertAdjacentHTML('beforeend', html);
+            });
+
+            document.getElementById('prev-btn').style.visibility = currentQuestion === 0 ? 'hidden' : 'visible';
+            document.getElementById('next-btn').disabled = answers[currentQuestion] === undefined;
+            document.getElementById('next-btn').innerHTML = currentQuestion === questions.length - 1 
+                ? '結果を見る <i class="fa-solid fa-check ml-1"></i>' 
+                : '次へ <i class="fa-solid fa-arrow-right ml-1"></i>';
+        }
+
+        function selectOption(axis) {
+            answers[currentQuestion] = axis;
+            document.getElementById('next-btn').disabled = false;
+        }
+
+        function nextQuestion() {
+            if (answers[currentQuestion] === undefined) return;
+
+            if (currentQuestion < questions.length - 1) {
+                currentQuestion++;
+                renderQuestion();
+            } else {
+                showResults();
+            }
+        }
+
+        function prevQuestion() {
+            if (currentQuestion > 0) {
+                currentQuestion--;
+                renderQuestion();
+            }
+        }
+
+        function calculateScores() {
+            let eCount = 0, iCount = 0;
+            let aCount = 0, gCount = 0;
+
+            Object.values(answers).forEach(val => {
+                if (val === 'E') eCount++;
+                if (val === 'I') iCount++;
+                if (val === 'A') aCount++;
+                if (val === 'G') gCount++;
+            });
+
+            const scores = {
+                chimpanzee: Math.round(((eCount / 6) * 50) + ((aCount / 6) * 50)),
+                bonobo: Math.round(((eCount / 6) * 50) + ((gCount / 6) * 50)),
+                gorilla: Math.round(((iCount / 6) * 50) + ((gCount / 6) * 50)),
+                orangutan: Math.round(((iCount / 6) * 50) + ((aCount / 6) * 50))
+            };
+
+            let highestType = 'chimpanzee';
+            let maxScore = -1;
+
+            Object.keys(scores).forEach(type => {
+                if (scores[type] > maxScore) {
+                    maxScore = scores[type];
+                    highestType = type;
+                }
+            });
+
+            return { scores, highestType, extraversion: eCount, achievement: aCount };
+        }
+
+        function showResults() {
+            document.getElementById('quiz-screen').classList.add('hidden');
+            document.getElementById('result-screen').classList.remove('hidden');
+
+            const { scores, highestType } = calculateScores();
+            const mainDetail = typeDetails[highestType];
+
+            const card = document.getElementById('main-result-card');
+            card.className = `p-6 rounded-3xl text-center mb-6 border shadow-sm transition ${mainDetail.colorClass}`;
+            
+            document.getElementById('result-emoji').innerText = mainDetail.emoji;
+            document.getElementById('result-type-title').innerText = `${mainDetail.name}タイプ`;
+            document.getElementById('result-catchphrase').innerText = mainDetail.catchphrase;
+            document.getElementById('result-description').innerText = mainDetail.description;
+            document.getElementById('result-dining-advice').innerText = mainDetail.diningAdvice;
+
+            const ratioContainer = document.getElementById('ratio-bars');
+            ratioContainer.innerHTML = '';
+
+            const totalScore = Object.values(scores).reduce((a, b) => a + b, 0) || 1;
+
+            Object.keys(scores).forEach(type => {
+                const info = typeDetails[type];
+                const percentage = Math.round((scores[type] / totalScore) * 100);
+
+                const barHtml = `
+                    <div>
+                        <div class="flex justify-between text-xs font-bold mb-1 text-slate-600">
+                            <span>${info.emoji} ${info.name}</span>
+                            <span>${percentage}%</span>
+                        </div>
+                        <div class="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
+                            <div class="${info.barColor} h-full transition-all duration-500" style="width: ${percentage}%;"></div>
+                        </div>
+                    </div>
+                `;
