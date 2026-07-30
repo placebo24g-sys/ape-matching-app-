@@ -2,8 +2,8 @@ import datetime
 import uuid
 from typing import List, Optional
 
-from fastapi import FastAPI, HTTPException, Depends, status
-from fastapi.middleware.cors import CORSMiddleware  # ★CORS設定を追加
+from fastapi import FastAPI, HTTPException, Depends, status  # ★ status は小文字
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, String, Integer, DateTime
 from sqlalchemy.ext.declarative import declarative_base
@@ -85,12 +85,11 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# ★ フロントエンド（HTML/JS）からのクロスオリジン通信を許可するミドルウェア
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 開発時はすべてのドメインからのリクエストを許可
+    allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # POST, GET, OPTIONS 等の全メソッドを許可
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -99,7 +98,7 @@ app.add_middleware(
 # ==========================================
 
 # --- 【機能1】診断結果の保存 API ---
-@app.post("/api/ape-profiles", status_code=Status.HTTP_201_CREATED, tags=["Diagnostic"])
+@app.post("/api/ape-profiles", status_code=status.HTTP_201_CREATED, tags=["Diagnostic"])  # ★ status_codeを小文字に変更
 def create_ape_profile(data: DiagnosticResultCreate, db: Session = Depends(get_db)):
     """
     フロントエンドの診断画面から送信されたユーザーのスコア結果をDBに保存します。
@@ -125,7 +124,7 @@ def create_ape_profile(data: DiagnosticResultCreate, db: Session = Depends(get_d
 
 
 # --- 【機能2】マッチング生成＆店舗レコメンド API ---
-@app.post("/api/matches/generate", status_code=Status.HTTP_201_CREATED, tags=["Matching"])
+@app.post("/api/matches/generate", status_code=status.HTTP_201_CREATED, tags=["Matching"])  # ★ status_codeを小文字に変更
 def generate_matches_and_recommendations(payload: MatchGenerateRequest):
     """
     応募者一覧を受け取り、性別バランスを満たす4人組マッチングと最適店舗のレコメンドを一括生成します。
