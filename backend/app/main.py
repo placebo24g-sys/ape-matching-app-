@@ -3,6 +3,7 @@ import uuid
 from typing import List, Optional
 
 from fastapi import FastAPI, HTTPException, Depends, Status
+from fastapi.middleware.cors import CORSMiddleware  # ★CORS設定を追加
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, Column, String, Integer, DateTime
 from sqlalchemy.ext.declarative import declarative_base
@@ -76,12 +77,21 @@ class MatchGenerateRequest(BaseModel):
     applications: List[ApplicationMemberInput]
 
 # ==========================================
-# 4. FastAPI アプリケーション初期化
+# 4. FastAPI アプリケーション初期化 ＆ CORS設定
 # ==========================================
 app = FastAPI(
     title="Ape Matching System API",
     description="類人猿診断結果の保存および4人マッチング＆店舗レコメンド統合API",
     version="1.0.0"
+)
+
+# ★ フロントエンド（HTML/JS）からのクロスオリジン通信を許可するミドルウェア
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # 開発時はすべてのドメインからのリクエストを許可
+    allow_credentials=True,
+    allow_methods=["*"],  # POST, GET, OPTIONS 等の全メソッドを許可
+    allow_headers=["*"],
 )
 
 # ==========================================
