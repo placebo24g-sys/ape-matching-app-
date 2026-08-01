@@ -173,35 +173,31 @@ def run_matching(x_admin_password: Optional[str] = Header(None)):
         if len(users) < 3:
             continue
 
-        # 類人猿タイプが多様になるようにバランスソート
-        # タイプごとにユーザーを分類
+        # タイプ別にユーザーを整理
         type_buckets = defaultdict(list)
-        for user in users:
-            type_buckets[user["primary_type"]].append(user)
+        for u in users:
+            type_buckets[u["primary_type"]].append(u)
 
-        # 4人ずつ（または3人）チームを組む
-        while len(users) >= 3:
+        remaining_users = list(users)
+
+        while len(remaining_users) >= 3:
+            target_size = 4 if len(remaining_users) >= 4 else 3
             group_members = []
-            target_size = 4 if len(users) >= 4 else 3
 
-            # 異なったタイプから順番に抽出
-            types = list(type_buckets.keys())
-            while len(group_members) < target_size and users:
-                added = False
-                for t in list(type_buckets.keys()):
-                    if type_buckets[t]:
-                        m = type_buckets[t].pop(0)
-                        group_members.append(m)
-                        users.remove(m)
-                        if not type_buckets[t]:
-                            del type_buckets[t]
-                        if len(group_members) == target_size:
-                            added = True
-                            break
-                if not added and users:
-                    # タイプ分散できなくなったら残りを順番に追加
-                    m = users.pop(0)
-                    group_members.append(m)
+            # 異なるタイプから優先的に1人ずつ選出
+            for t, bucket in list(type_buckets.items()):
+                if bucket and len(group_members) < target_size:
+                    selected = bucket.pop(0)
+                    group_members.append(selected)
+                    remaining_users.remove(selected)
+
+            # タイプ分散だけでは枠が埋まらない場合、残りの人から追加
+            while len(group_members) < target_size and remaining_users:
+                selected = remaining_users.pop(0)
+                group_members.append(selected)
+                # バケット側からも取り除く
+                if selected in type_buckets[selected["primary_type"]]:
+                    type_buckets[selected["primary_type"]].remove(selected)
 
             # グループID生成 & DB更新
             group_id = f"grp_{uuid.uuid4().hex[:8]}"
