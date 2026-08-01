@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, status, Depends
+from fastapi import FastAPI, HTTPException, status, Header
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Optional
@@ -19,6 +19,9 @@ app.add_middleware(
 
 DB_PATH = "ape_app.db"
 
+# 管理画面アクセス用のパスワード（お好みの文字列に変更してください）
+ADMIN_PASSWORD = "ape_secret_pass_2026"
+
 # DB初期化（テーブル生成）
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -38,7 +41,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # 予約申し込みテーブル（新規追加）
+    # 予約申し込みテーブル
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bookings (
             booking_id TEXT PRIMARY KEY,
@@ -67,7 +70,7 @@ class BookingCreate(BaseModel):
 
 # --- API エンドポイント ---
 
-# 1. 予約の保存 API
+# 1. 予約の保存 API（ユーザーフロント用）
 @app.post("/api/bookings", status_code=status.HTTP_201_CREATED)
 def create_booking(booking: BookingCreate):
     booking_id = f"bk_{uuid.uuid4().hex[:8]}"
@@ -95,9 +98,16 @@ def create_booking(booking: BookingCreate):
     
     return {"status": "success", "booking_id": booking_id, "message": "予約が保存されました"}
 
-# 2. 予約一覧取得 API（管理画面用）
+# 2. 予約一覧取得 API（管理画面用・パスワード認証付き）
 @app.get("/api/bookings")
-def get_bookings():
+def get_bookings(x_admin_password: Optional[str] = Header(None)):
+    # パスワードの検証
+    if x_admin_password != ADMIN_PASSWORD:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="パスワードが正しくありません"
+        )
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT booking_id, user_id, name, gender, area, preferred_datetime, primary_type, created_at FROM bookings ORDER BY created_at DESC")
