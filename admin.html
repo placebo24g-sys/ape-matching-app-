@@ -14,7 +14,32 @@
   </style>
 </head>
 <body class="bg-slate-100 text-slate-800 min-h-screen p-4 md:p-8">
-  <div class="max-w-6xl mx-auto">
+
+  <!-- ログインモーダル -->
+  <div id="login-modal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 border border-slate-100">
+      <div class="text-center mb-6">
+        <div class="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-3 text-2xl">
+          <i class="fa-solid fa-lock"></i>
+        </div>
+        <h2 class="text-xl font-bold text-slate-800">管理者ログイン</h2>
+        <p class="text-xs text-slate-500 mt-1">ダッシュボードを閲覧するにはパスワードが必要です</p>
+      </div>
+      <form id="login-form" class="space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1">パスワード</label>
+          <input type="password" id="admin-pass-input" required placeholder="管理者パスワードを入力" class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm outline-none">
+          <p id="login-error" class="text-xs text-red-500 mt-1 hidden">パスワードが違います</p>
+        </div>
+        <button type="submit" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow transition">
+          ログインする
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- 管理画面メインコンテンツ -->
+  <div id="admin-content" class="max-w-6xl mx-auto hidden">
     <!-- ヘッダー -->
     <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 bg-white p-6 rounded-2xl shadow-sm border border-slate-200 gap-4">
       <div>
@@ -23,9 +48,14 @@
         </h1>
         <p class="text-xs text-slate-500 mt-1">食事会マッチングへの応募・予約者一覧</p>
       </div>
-      <button id="btn-refresh" class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition shadow flex items-center gap-2">
-        <i class="fa-solid fa-rotate-right"></i> データを更新する
-      </button>
+      <div class="flex gap-2">
+        <button id="btn-refresh" class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition shadow flex items-center gap-2">
+          <i class="fa-solid fa-rotate-right"></i> 更新
+        </button>
+        <button id="btn-logout" class="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-bold rounded-xl transition flex items-center gap-2">
+          <i class="fa-solid fa-right-from-bracket"></i> ログアウト
+        </button>
+      </div>
     </header>
 
     <!-- 一覧テーブルカード -->
@@ -57,16 +87,49 @@
   <script>
     const BOOKING_API_URL = 'https://ape-matching-api.onrender.com/api/bookings';
 
+    const loginModal = document.getElementById('login-modal');
+    const adminContent = document.getElementById('admin-content');
+    const loginForm = document.getElementById('login-form');
+    const loginError = document.getElementById('login-error');
+
+    // 保存されているパスワードを取得
+    function getSavedPassword() {
+      return sessionStorage.getItem('ape_admin_password');
+    }
+
+    // データ取得処理（パスワードをヘッダーにセット）
     async function fetchBookings() {
+      const password = getSavedPassword();
+      if (!password) {
+        showLogin();
+        return;
+      }
+
       const tbody = document.getElementById('bookings-tbody');
       tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-400">読み込み中...</td></tr>`;
 
       try {
-        const response = await fetch(BOOKING_API_URL);
+        const response = await fetch(BOOKING_API_URL, {
+          headers: {
+            'x-admin-password': password
+          }
+        });
+
+        if (response.status === 401) {
+          // パスワード認証失敗
+          sessionStorage.removeItem('ape_admin_password');
+          loginError.textContent = 'パスワードが間違っているか、期限が切れました';
+          loginError.classList.remove('hidden');
+          showLogin();
+          return;
+        }
+
         if (!response.ok) {
           throw new Error('データの取得に失敗しました');
         }
+
         const bookings = await response.json();
+        hideLogin();
 
         if (bookings.length === 0) {
           tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-400">現在、予約データはありません</td></tr>`;
@@ -90,12 +153,45 @@
         });
       } catch (error) {
         console.error(error);
-        tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-red-500">データの取得に失敗しました。サーバーが起動中か確認してください。</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-red-500">データの取得に失敗しました。サーバーの状態を確認してください。</td></tr>`;
       }
     }
 
+    function showLogin() {
+      loginModal.classList.remove('hidden');
+      adminContent.classList.add('hidden');
+    }
+
+    function hideLogin() {
+      loginModal.classList.add('hidden');
+      adminContent.classList.remove('hidden');
+    }
+
+    // ログインフォーム送信
+    loginForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const inputPass = document.getElementById('admin-pass-input').value;
+      sessionStorage.setItem('ape_admin_password', inputPass);
+      loginError.classList.add('hidden');
+      fetchBookings();
+    });
+
+    // ログアウト
+    document.getElementById('btn-logout').addEventListener('click', () => {
+      sessionStorage.removeItem('ape_admin_password');
+      showLogin();
+    });
+
     document.getElementById('btn-refresh').addEventListener('click', fetchBookings);
-    document.addEventListener('DOMContentLoaded', fetchBookings);
+
+    // 初期表示
+    document.addEventListener('DOMContentLoaded', () => {
+      if (getSavedPassword()) {
+        fetchBookings();
+      } else {
+        showLogin();
+      }
+    });
   </script>
 </body>
 </html>
