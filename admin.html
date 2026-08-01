@@ -28,7 +28,7 @@
       <form id="login-form" class="space-y-4">
         <div>
           <label class="block text-xs font-bold text-slate-600 mb-1">パスワード</label>
-          <input type="password" id="admin-pass-input" required placeholder="管理者パスワードを入力" class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm outline-none">
+          <input type="password" id="admin-pass-input" required placeholder="管理者パスワードを入力" class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm outline-none">
           <p id="login-error" class="text-xs text-red-500 mt-1 hidden">パスワードが違います</p>
         </div>
         <button type="submit" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow transition">
@@ -46,9 +46,12 @@
         <h1 class="text-2xl font-bold flex items-center gap-2 text-slate-800">
           <i class="fa-solid fa-gauge-high text-emerald-600"></i> 管理者ダッシュボード
         </h1>
-        <p class="text-xs text-slate-500 mt-1">食事会マッチングへの応募・予約者一覧</p>
+        <p class="text-xs text-slate-500 mt-1">食事会マッチングの応募・自動マッチング管理</p>
       </div>
-      <div class="flex gap-2">
+      <div class="flex flex-wrap gap-2">
+        <button id="btn-run-match" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition shadow flex items-center gap-2">
+          <i class="fa-solid fa-wand-magic-sparkles"></i> 自動マッチング実行
+        </button>
         <button id="btn-refresh" class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition shadow flex items-center gap-2">
           <i class="fa-solid fa-rotate-right"></i> 更新
         </button>
@@ -58,8 +61,18 @@
       </div>
     </header>
 
-    <!-- 一覧テーブルカード -->
-    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+    <!-- タブ切り替え -->
+    <div class="flex border-b border-slate-200 mb-6 gap-2">
+      <button id="tab-btn-bookings" class="px-5 py-3 font-bold text-sm rounded-t-xl bg-white text-emerald-600 border-t-2 border-emerald-600 shadow-sm">
+        <i class="fa-solid fa-list-check mr-1"></i> 予約申込一覧
+      </button>
+      <button id="tab-btn-groups" class="px-5 py-3 font-bold text-sm rounded-t-xl bg-slate-200 text-slate-600 hover:bg-slate-300 transition">
+        <i class="fa-solid fa-users mr-1"></i> マッチング成立グループ
+      </button>
+    </div>
+
+    <!-- 1. 予約申し込み一覧タブ -->
+    <div id="tab-content-bookings" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
       <div class="overflow-x-auto">
         <table class="w-full text-left border-collapse">
           <thead>
@@ -70,74 +83,72 @@
               <th class="p-4">希望エリア</th>
               <th class="p-4">希望日時</th>
               <th class="p-4">診断タイプ</th>
+              <th class="p-4">ステータス</th>
               <th class="p-4">申込日時</th>
             </tr>
           </thead>
           <tbody id="bookings-tbody" class="divide-y divide-slate-100 text-sm">
             <tr>
-              <td colspan="7" class="p-8 text-center text-slate-400">データを読み込み中...</td>
+              <td colspan="8" class="p-8 text-center text-slate-400">データを読み込み中...</td>
             </tr>
           </tbody>
         </table>
       </div>
     </div>
+
+    <!-- 2. マッチング成立グループタブ -->
+    <div id="tab-content-groups" class="hidden space-y-4">
+      <div id="groups-container" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- JSでグループカードが挿入されます -->
+      </div>
+    </div>
   </div>
 
-  <!-- スクリプト -->
   <script>
-    const BOOKING_API_URL = 'https://ape-matching-api.onrender.com/api/bookings';
+    const API_BASE = 'https://ape-matching-api.onrender.com/api';
 
     const loginModal = document.getElementById('login-modal');
     const adminContent = document.getElementById('admin-content');
     const loginForm = document.getElementById('login-form');
     const loginError = document.getElementById('login-error');
 
-    // 保存されているパスワードを取得
     function getSavedPassword() {
       return sessionStorage.getItem('ape_admin_password');
     }
 
-    // データ取得処理（パスワードをヘッダーにセット）
+    // 予約一覧の取得
     async function fetchBookings() {
       const password = getSavedPassword();
-      if (!password) {
-        showLogin();
-        return;
-      }
+      if (!password) return showLogin();
 
       const tbody = document.getElementById('bookings-tbody');
-      tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-400">読み込み中...</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400">読み込み中...</td></tr>`;
 
       try {
-        const response = await fetch(BOOKING_API_URL, {
-          headers: {
-            'x-admin-password': password
-          }
+        const response = await fetch(`${API_BASE}/bookings`, {
+          headers: { 'x-admin-password': password }
         });
 
         if (response.status === 401) {
-          // パスワード認証失敗
           sessionStorage.removeItem('ape_admin_password');
-          loginError.textContent = 'パスワードが間違っているか、期限が切れました';
-          loginError.classList.remove('hidden');
           showLogin();
           return;
-        }
-
-        if (!response.ok) {
-          throw new Error('データの取得に失敗しました');
         }
 
         const bookings = await response.json();
         hideLogin();
 
         if (bookings.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-400">現在、予約データはありません</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400">現在、予約データはありません</td></tr>`;
           return;
         }
 
         tbody.innerHTML = '';
         bookings.forEach(b => {
+          const statusBadge = b.status === 'matched' 
+            ? `<span class="px-2.5 py-1 bg-blue-100 text-blue-700 text-xs font-bold rounded-full">マッチ済み (${b.group_id})</span>`
+            : `<span class="px-2.5 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full">未マッチ</span>`;
+
           const tr = document.createElement('tr');
           tr.className = 'hover:bg-slate-50/80 transition-colors';
           tr.innerHTML = `
@@ -147,15 +158,112 @@
             <td class="p-4 text-slate-600">${b.area}</td>
             <td class="p-4 text-slate-600">${b.datetime ? b.datetime.replace('T', ' ') : '-'}</td>
             <td class="p-4"><span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full">${b.primary_type}</span></td>
+            <td class="p-4">${statusBadge}</td>
             <td class="p-4 text-xs text-slate-400">${b.created_at || '-'}</td>
           `;
           tbody.appendChild(tr);
         });
       } catch (error) {
         console.error(error);
-        tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-red-500">データの取得に失敗しました。サーバーの状態を確認してください。</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-red-500">データ取得に失敗しました。</td></tr>`;
       }
     }
+
+    // マッチング成立グループ一覧の取得
+    async function fetchGroups() {
+      const password = getSavedPassword();
+      if (!password) return showLogin();
+
+      const container = document.getElementById('groups-container');
+      container.innerHTML = `<p class="col-span-2 text-center text-slate-400 p-8">グループデータを読み込み中...</p>`;
+
+      try {
+        const response = await fetch(`${API_BASE}/matchings`, {
+          headers: { 'x-admin-password': password }
+        });
+
+        const groups = await response.json();
+        if (groups.length === 0) {
+          container.innerHTML = `<p class="col-span-2 text-center text-slate-400 p-8">まだ成立したマッチンググループはありません。</p>`;
+          return;
+        }
+
+        container.innerHTML = '';
+        groups.forEach(g => {
+          const firstMember = g.members[0];
+          const card = document.createElement('div');
+          card.className = 'bg-white p-6 rounded-2xl shadow-sm border border-slate-200';
+          
+          let memberListHtml = g.members.map(m => `
+            <div class="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
+              <div>
+                <span class="font-bold text-slate-800">${m.name}</span>
+                <span class="text-xs text-slate-500 ml-2">(${m.gender})</span>
+              </div>
+              <span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full">${m.primary_type}</span>
+            </div>
+          `).join('');
+
+          card.innerHTML = `
+            <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+              <div>
+                <span class="text-xs font-mono bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold">${g.group_id}</span>
+                <p class="text-xs text-slate-500 mt-1"><i class="fa-solid fa-location-dot"></i> ${firstMember.area} | <i class="fa-regular fa-clock"></i> ${firstMember.datetime.replace('T', ' ')}</p>
+              </div>
+              <span class="text-xs font-bold bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full">${g.members.length}名チーム</span>
+            </div>
+            <div class="space-y-2">
+              ${memberListHtml}
+            </div>
+          `;
+          container.appendChild(card);
+        });
+      } catch (error) {
+        console.error(error);
+        container.innerHTML = `<p class="col-span-2 text-center text-red-500 p-8">エラーが発生しました。</p>`;
+      }
+    }
+
+    // 自動マッチングを実行するボタンの処理
+    document.getElementById('btn-run-match').addEventListener('click', async () => {
+      const password = getSavedPassword();
+      if (!confirm('未マッチングの予約データから自動マッチングを実行しますか？')) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/matchings/run`, {
+          method: 'POST',
+          headers: { 'x-admin-password': password }
+        });
+        const res = await response.json();
+        alert(res.message);
+        fetchBookings();
+        fetchGroups();
+      } catch (error) {
+        alert('マッチング処理の実行に失敗しました');
+      }
+    });
+
+    // タブ切り替え制御
+    const tabBookings = document.getElementById('tab-btn-bookings');
+    const tabGroups = document.getElementById('tab-btn-groups');
+    const contentBookings = document.getElementById('tab-content-bookings');
+    const contentGroups = document.getElementById('tab-content-groups');
+
+    tabBookings.addEventListener('click', () => {
+      tabBookings.className = 'px-5 py-3 font-bold text-sm rounded-t-xl bg-white text-emerald-600 border-t-2 border-emerald-600 shadow-sm';
+      tabGroups.className = 'px-5 py-3 font-bold text-sm rounded-t-xl bg-slate-200 text-slate-600 hover:bg-slate-300 transition';
+      contentBookings.classList.remove('hidden');
+      contentGroups.classList.add('hidden');
+      fetchBookings();
+    });
+
+    tabGroups.addEventListener('click', () => {
+      tabGroups.className = 'px-5 py-3 font-bold text-sm rounded-t-xl bg-white text-emerald-600 border-t-2 border-emerald-600 shadow-sm';
+      tabBookings.className = 'px-5 py-3 font-bold text-sm rounded-t-xl bg-slate-200 text-slate-600 hover:bg-slate-300 transition';
+      contentGroups.classList.remove('hidden');
+      contentBookings.classList.add('hidden');
+      fetchGroups();
+    });
 
     function showLogin() {
       loginModal.classList.remove('hidden');
@@ -167,30 +275,26 @@
       adminContent.classList.remove('hidden');
     }
 
-    // ログインフォーム送信
     loginForm.addEventListener('submit', (e) => {
       e.preventDefault();
       const inputPass = document.getElementById('admin-pass-input').value;
       sessionStorage.setItem('ape_admin_password', inputPass);
-      loginError.classList.add('hidden');
       fetchBookings();
     });
 
-    // ログアウト
     document.getElementById('btn-logout').addEventListener('click', () => {
       sessionStorage.removeItem('ape_admin_password');
       showLogin();
     });
 
-    document.getElementById('btn-refresh').addEventListener('click', fetchBookings);
+    document.getElementById('btn-refresh').addEventListener('click', () => {
+      if (!contentBookings.classList.contains('hidden')) fetchBookings();
+      else fetchGroups();
+    });
 
-    // 初期表示
     document.addEventListener('DOMContentLoaded', () => {
-      if (getSavedPassword()) {
-        fetchBookings();
-      } else {
-        showLogin();
-      }
+      if (getSavedPassword()) fetchBookings();
+      else showLogin();
     });
   </script>
 </body>
