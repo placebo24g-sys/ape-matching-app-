@@ -20,12 +20,11 @@ app.add_middleware(
 DB_PATH = "ape_app.db"
 ADMIN_PASSWORD = "ape_secret_pass_2026"
 
-# DB初期化（テーブル生成 & 自動カラム追加）
+# DB初期化
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # 1. 診断プロフィールテーブル
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS ape_profiles (
             profile_id TEXT PRIMARY KEY,
@@ -41,7 +40,6 @@ def init_db():
         )
     """)
     
-    # 2. 予約申し込みテーブル
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS bookings (
             booking_id TEXT PRIMARY KEY,
@@ -57,7 +55,6 @@ def init_db():
         )
     """)
     
-    # 既存のDBへのカラム追加（すでにテーブルが存在している場合用）
     cursor.execute("PRAGMA table_info(bookings)")
     columns = [column[1] for column in cursor.fetchall()]
     if 'status' not in columns:
@@ -70,7 +67,6 @@ def init_db():
 
 init_db()
 
-# --- リクエスト/レスポンスの型定義 ---
 class BookingCreate(BaseModel):
     user_id: str
     name: str
@@ -79,9 +75,6 @@ class BookingCreate(BaseModel):
     datetime: str
     primary_type: Optional[str] = "gorilla"
 
-# --- API エンドポイント ---
-
-# 1. 予約の保存 API（ユーザーフロント用）
 @app.post("/api/bookings", status_code=status.HTTP_201_CREATED)
 def create_booking(booking: BookingCreate):
     booking_id = f"bk_{uuid.uuid4().hex[:8]}"
@@ -109,7 +102,6 @@ def create_booking(booking: BookingCreate):
     
     return {"status": "success", "booking_id": booking_id, "message": "予約が保存されました"}
 
-# 2. 予約一覧取得 API（管理画面用）
 @app.get("/api/bookings")
 def get_bookings(x_admin_password: Optional[str] = Header(None)):
     if x_admin_password != ADMIN_PASSWORD:
@@ -137,7 +129,7 @@ def get_bookings(x_admin_password: Optional[str] = Header(None)):
         })
     return bookings
 
-# 3. 自動マッチング実行 API（管理画面用）
+# 3. 自動マッチング実行 API（1時間単位集約版）
 @app.post("/api/matchings/run")
 def run_matching(x_admin_password: Optional[str] = Header(None)):
     if x_admin_password != ADMIN_PASSWORD:
@@ -146,7 +138,6 @@ def run_matching(x_admin_password: Optional[str] = Header(None)):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
 
-    # 未マッチング（pending）のデータを取り出す
     cursor.execute("SELECT booking_id, name, gender, area, preferred_datetime, primary_type FROM bookings WHERE status = 'pending'")
     pending_users = cursor.fetchall()
 
@@ -154,26 +145,28 @@ def run_matching(x_admin_password: Optional[str] = Header(None)):
         conn.close()
         return {"status": "success", "created_groups": 0, "message": "マッチング対象の未処理予約はありません"}
 
-    # エリア×日時 でグループ化
+    # エリア × 日付・時間（1時間単位）でグループ化
     slots = defaultdict(list)
     for u in pending_users:
-        key = (u[3], u[4])  # (area, preferred_datetime)
+        raw_dt = u[4].replace('T', ' ')  # 例: "2026-08-08 23:02"
+        # 「YYYY-MM-DD HH」単位（最初の13文字）で集約
+        dt_hour = raw_dt[:13] if len(raw_dt) >= 13 else raw_dt
+        
+        key = (u[3], dt_hour)  # (area, dt_hour)
         slots[key].append({
             "booking_id": u[0],
             "name": u[1],
             "gender": u[2],
-            "primary_type": u[5]
+            "primary_type": u[5],
+            "raw_datetime": u[4]
         })
 
     created_groups_count = 0
 
-    # 各枠ごとにマッチング処理
-    for (area, dt), users in slots.items():
-        # 人数が3人未満ならマッチング成立見送り（次回へ保留）
+    for (area, dt_hour), users in slots.items():
         if len(users) < 3:
             continue
 
-        # タイプ別にユーザーを整理
         type_buckets = defaultdict(list)
         for u in users:
             type_buckets[u["primary_type"]].append(u)
@@ -184,22 +177,18 @@ def run_matching(x_admin_password: Optional[str] = Header(None)):
             target_size = 4 if len(remaining_users) >= 4 else 3
             group_members = []
 
-            # 異なるタイプから優先的に1人ずつ選出
             for t, bucket in list(type_buckets.items()):
                 if bucket and len(group_members) < target_size:
                     selected = bucket.pop(0)
                     group_members.append(selected)
                     remaining_users.remove(selected)
 
-            # タイプ分散だけでは枠が埋まらない場合、残りの人から追加
             while len(group_members) < target_size and remaining_users:
                 selected = remaining_users.pop(0)
                 group_members.append(selected)
-                # バケット側からも取り除く
                 if selected in type_buckets[selected["primary_type"]]:
                     type_buckets[selected["primary_type"]].remove(selected)
 
-            # グループID生成 & DB更新
             group_id = f"grp_{uuid.uuid4().hex[:8]}"
             member_ids = [m["booking_id"] for m in group_members]
             
@@ -218,7 +207,6 @@ def run_matching(x_admin_password: Optional[str] = Header(None)):
         "message": f"{created_groups_count} 件のマッチンググループを作成しました"
     }
 
-# 4. マッチング済みグループ一覧取得 API
 @app.get("/api/matchings")
 def get_matchings(x_admin_password: Optional[str] = Header(None)):
     if x_admin_password != ADMIN_PASSWORD:
