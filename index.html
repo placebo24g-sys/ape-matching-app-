@@ -209,6 +209,7 @@
     document.addEventListener('DOMContentLoaded', () => {
       // API 設定（Render本番環境）
       const API_URL = 'https://ape-matching-api.onrender.com/api/ape-profiles';
+      const BOOKING_API_URL = 'https://ape-matching-api.onrender.com/api/bookings';
 
       // ユーザーIDの取得または作成（ローカルストレージに保存）
       let userId = localStorage.getItem('ape_user_id');
@@ -300,26 +301,47 @@
       btnCloseModal.addEventListener('click', () => bookingModal.classList.add('hidden'));
       btnCancelModal.addEventListener('click', () => bookingModal.classList.add('hidden'));
 
-      // 予約フォーム送信イベント
+      // 予約フォーム送信イベント（FastAPIサーバーへ保存）
       bookingForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        
+
+        const submitBtn = document.getElementById('btn-submit-booking');
+        submitBtn.disabled = true;
+        submitBtn.textContent = '送信中...';
+
         const bookingData = {
-          app_id: 'app_' + Math.random().toString(36).substring(2, 9),
           user_id: userId,
           name: document.getElementById('user-name').value,
           gender: document.getElementById('user-gender').value,
           area: document.getElementById('preferred-area').value,
           datetime: document.getElementById('preferred-datetime').value,
-          primary_type: latestResult ? latestResult.primaryType.toLowerCase() : 'gorilla',
-          extraversion_score: latestResult ? latestResult.scoreE : 0,
-          achievement_score: latestResult ? latestResult.scoreA : 0
+          primary_type: latestResult ? latestResult.primaryType.toLowerCase() : 'gorilla'
         };
 
-        console.log('予約申し込みデータ:', bookingData);
-        alert(`【仮予約完了】\n${bookingData.name} 様、食事会マッチングへのご応募を受け付けました！\n（マッチング結果確定後、ご連絡いたします）`);
-        bookingModal.classList.add('hidden');
-        bookingForm.reset();
+        try {
+          const response = await fetch(BOOKING_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(bookingData)
+          });
+
+          if (!response.ok) {
+            throw new Error(`送信失敗: ${response.status}`);
+          }
+
+          const resData = await response.json();
+          console.log('予約がDBに保存されました:', resData);
+
+          alert(`【仮予約完了】\n${bookingData.name} 様、食事会マッチングへのご応募を受け付けました！\n（予約ID: ${resData.booking_id}）`);
+          bookingModal.classList.add('hidden');
+          bookingForm.reset();
+        } catch (error) {
+          console.error('予約エラー:', error);
+          alert('予約の送信に失敗しました。時間をおいて再度お試しください。');
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '予約を送信する <i class="fa-solid fa-paper-plane ml-1"></i>';
+        }
       });
 
       // 診断開始
@@ -489,7 +511,7 @@
         await saveResultToPythonBackend(latestResult);
       }
 
-      // API送信関数
+      // API送信関数（診断結果保存）
       async function saveResultToPythonBackend(result) {
         try {
           const payload = {
