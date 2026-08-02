@@ -7,7 +7,7 @@ import uuid
 from collections import defaultdict
 import itertools
 
-from sqlalchemy import create_engine, String, Integer, Column, DateTime, func, select, update
+from sqlalchemy import create_engine, String, Integer, Column, DateTime, func, select, update, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
 
 # ------------------------------------------
@@ -78,6 +78,25 @@ class BookingModel(Base):
 
 # テーブル作成
 Base.metadata.create_all(bind=engine)
+
+# --------------------------------------------------------
+# 【追加】既存DBに area_2, datetime_2 がない場合の自動追加処理
+# --------------------------------------------------------
+with engine.connect() as conn:
+    try:
+        if DATABASE_URL.startswith("sqlite"):
+            # SQLiteの場合
+            conn.execute(text("ALTER TABLE bookings ADD COLUMN area_2 VARCHAR;"))
+            conn.execute(text("ALTER TABLE bookings ADD COLUMN datetime_2 VARCHAR;"))
+        else:
+            # PostgreSQL (Render) の場合
+            conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS area_2 VARCHAR;"))
+            conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS datetime_2 VARCHAR;"))
+        conn.commit()
+    except Exception as e:
+        # 既にカラムが存在する場合などのエラーをスキップ
+        print(f"[DB Auto Migration Note] {e}")
+# --------------------------------------------------------
 
 def get_db():
     db = SessionLocal()
