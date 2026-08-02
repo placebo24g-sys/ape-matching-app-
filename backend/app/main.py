@@ -79,30 +79,6 @@ class BookingModel(Base):
 # テーブル作成（存在しない場合のみ新規作成）
 Base.metadata.create_all(bind=engine)
 
-# --------------------------------------------------------
-# 【安全版】既存DBに area_2, datetime_2 カラムを追加する処理
-# --------------------------------------------------------
-try:
-    with engine.begin() as conn:
-        if DATABASE_URL.startswith("sqlite"):
-            # SQLite用（カラム未存在時のみ個別追加）
-            try:
-                conn.execute(text("ALTER TABLE bookings ADD COLUMN area_2 VARCHAR;"))
-            except Exception:
-                pass
-            try:
-                conn.execute(text("ALTER TABLE bookings ADD COLUMN datetime_2 VARCHAR;"))
-            except Exception:
-                pass
-        else:
-            # PostgreSQL (Render) 用
-            conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS area_2 VARCHAR;"))
-            conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS datetime_2 VARCHAR;"))
-    print("[DB Migration] Columns area_2 and datetime_2 verified successfully.")
-except Exception as e:
-    print(f"[DB Migration Warning] {e}")
-# --------------------------------------------------------
-
 def get_db():
     db = SessionLocal()
     try:
