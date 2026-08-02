@@ -126,15 +126,20 @@
 
       try {
         const response = await fetch(`${API_BASE}/bookings`, {
-          headers: { 'x-admin-password': password }
+          method: 'GET',
+          headers: { 
+            'X-Admin-Password': password 
+          }
         });
 
         if (response.status === 401) {
           sessionStorage.removeItem('ape_admin_password');
+          loginError.classList.remove('hidden');
           showLogin();
           return;
         }
 
+        loginError.classList.add('hidden');
         const bookings = await response.json();
         hideLogin();
 
@@ -179,7 +184,10 @@
 
       try {
         const response = await fetch(`${API_BASE}/matchings`, {
-          headers: { 'x-admin-password': password }
+          method: 'GET',
+          headers: { 
+            'X-Admin-Password': password 
+          }
         });
 
         const groups = await response.json();
@@ -208,7 +216,7 @@
             <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
               <div>
                 <span class="text-xs font-mono bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold">${g.group_id}</span>
-                <p class="text-xs text-slate-500 mt-1"><i class="fa-solid fa-location-dot"></i> ${firstMember.area} | <i class="fa-regular fa-clock"></i> ${firstMember.datetime.replace('T', ' ')}</p>
+                <p class="text-xs text-slate-500 mt-1"><i class="fa-solid fa-location-dot"></i> ${firstMember.area} | <i class="fa-regular fa-clock"></i> ${firstMember.datetime ? firstMember.datetime.replace('T', ' ') : '-'}</p>
               </div>
               <span class="text-xs font-bold bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full">${g.members.length}名チーム</span>
             </div>
@@ -232,7 +240,9 @@
       try {
         const response = await fetch(`${API_BASE}/matchings/run`, {
           method: 'POST',
-          headers: { 'x-admin-password': password }
+          headers: { 
+            'X-Admin-Password': password 
+          }
         });
         const res = await response.json();
         alert(res.message);
