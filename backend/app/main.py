@@ -115,12 +115,12 @@ def send_line_notification(to_user_id: str, message_text: str):
 # ==========================================
 app = FastAPI(title="類人猿マッチング API")
 
-# 【修正】CORS の詳細設定を追加し、すべてのリクエストとカスタムヘッダーを安全に通過させる
+# CORS の詳細設定
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["*"],
 )
@@ -212,7 +212,10 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
     return {"status": "success", "booking_id": booking_id, "message": "予約が保存されました"}
 
 @app.get("/api/bookings")
-def get_bookings(x_admin_password: Optional[str] = Header(None), db: Session = Depends(get_db)):
+def get_bookings(
+    x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password"), 
+    db: Session = Depends(get_db)
+):
     if x_admin_password != ADMIN_PASSWORD:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="パスワードが正しくありません")
 
@@ -236,7 +239,10 @@ def get_bookings(x_admin_password: Optional[str] = Header(None), db: Session = D
     } for b in bookings]
 
 @app.post("/api/matchings/run")
-def run_matching(x_admin_password: Optional[str] = Header(None), db: Session = Depends(get_db)):
+def run_matching(
+    x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password"), 
+    db: Session = Depends(get_db)
+):
     if x_admin_password != ADMIN_PASSWORD:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="パスワードが正しくありません")
 
@@ -326,7 +332,10 @@ def run_matching(x_admin_password: Optional[str] = Header(None), db: Session = D
     }
 
 @app.get("/api/matchings")
-def get_matchings(x_admin_password: Optional[str] = Header(None), db: Session = Depends(get_db)):
+def get_matchings(
+    x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password"), 
+    db: Session = Depends(get_db)
+):
     if x_admin_password != ADMIN_PASSWORD:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="パスワードが正しくありません")
 
