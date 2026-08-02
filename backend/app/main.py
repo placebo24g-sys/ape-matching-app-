@@ -5,12 +5,13 @@ from typing import List, Optional
 import os
 import uuid
 from collections import defaultdict
+import itertools
 
 from sqlalchemy import create_engine, String, Integer, Column, DateTime, func, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
 
 # ------------------------------------------
-# LINE SDK インポート（修正済み）
+# LINE SDK インポート
 # ------------------------------------------
 from linebot.v3.messaging import (
     Configuration,
@@ -60,8 +61,16 @@ class BookingModel(Base):
     user_id: Mapped[str] = mapped_column(String)
     name: Mapped[str] = mapped_column(String)
     gender: Mapped[str] = mapped_column(String)
+    age: Mapped[Optional[int]] = mapped_column(Integer, nullable=True) # 追加: 年齢
+    
+    # 第1希望
     area: Mapped[str] = mapped_column(String)
     preferred_datetime: Mapped[str] = mapped_column(String)
+    
+    # 第2希望 (追加)
+    area_2: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    datetime_2: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    
     primary_type: Mapped[Optional[str]] = mapped_column(String, default="gorilla")
     status: Mapped[str] = mapped_column(String, default="pending")
     group_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -102,7 +111,7 @@ def send_line_notification(to_user_id: str, message_text: str):
         return False
 
 # ==========================================
-# 3. FastAPI アプリケーション設定
+# 3. FastAPI アプリケーション設定 & Pydantic
 # ==========================================
 app = FastAPI(title="類人猿マッチング API")
 
@@ -120,13 +129,62 @@ class BookingCreate(BaseModel):
     user_id: str
     name: str
     gender: str
+    age: Optional[int] = None                  # 追加: 年齢
     area: str
     datetime: str
+    area_2: Optional[str] = None               # 追加: 第2希望エリア
+    datetime_2: Optional[str] = None           # 追加: 第2希望日時
     primary_type: Optional[str] = "gorilla"
 
-# ------------------------------------------
-# API エンドポイント
-# ------------------------------------------
+# ==========================================
+# 4. マッチング判定用ヘルパー関数
+# ==========================================
+def has_met_before(db: Session, candidate_users: List[BookingModel]) -> bool:
+    """過去に同じ group_id でマッチング済みのペアが紛れていないか判定"""
+    u_ids = [u.user_id for u in candidate_users]
+    
+    # 過去にマッチング成立済みのデータを取得
+    stmt = select(BookingModel).where(
+        BookingModel.user_id.in_(u_ids),
+        BookingModel.status == "matched",
+        BookingModel.group_id.isnot(None)
+    )
+    past_matches = db.scalars(stmt).all()
+
+    # グループIDごとにユーザーIDを集計
+    groups = defaultdict(set)
+    for m in past_matches:
+        groups[m.group_id].add(m.user_id)
+
+    # 候補者の中に過去の同一グループ構成員が2人以上被っていれば True (同席NG)
+    for g_users in groups.values():
+        if len(set(u_ids).intersection(g_users)) >= 2:
+            return True
+    return False
+
+def is_group_balanced(candidate_users: List[BookingModel]) -> bool:
+    """性別比・年齢差のバランス判定"""
+    # 1. 性別比チェック (4人の場合: 男3人女1人・男1人女3人などの極端な偏りを回避)
+    genders = [u.gender for u in candidate_users]
+    males = genders.count("male")
+    females = genders.count("female")
+    
+    if len(candidate_users) == 4 and (males == 3 and females == 1):
+        return False
+    if len(candidate_users) == 4 and (males == 1 and females == 3):
+        return False
+
+    # 2. 年齢差チェック (入力者の中で最大差が15歳以上の場合はスキップ)
+    ages = [u.age for u in candidate_users if u.age is not None]
+    if len(ages) >= 2:
+        if (max(ages) - min(ages)) > 15:
+            return False
+
+    return True
+
+# ==========================================
+# 5. API エンドポイント
+# ==========================================
 
 @app.post("/api/bookings", status_code=status.HTTP_201_CREATED)
 def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
@@ -137,8 +195,11 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
         user_id=booking.user_id,
         name=booking.name,
         gender=booking.gender,
+        age=booking.age,
         area=booking.area,
         preferred_datetime=booking.datetime,
+        area_2=booking.area_2,
+        datetime_2=booking.datetime_2,
         primary_type=booking.primary_type,
         status="pending"
     )
@@ -166,8 +227,11 @@ def get_bookings(x_admin_password: Optional[str] = Header(None), db: Session = D
         "user_id": b.user_id,
         "name": b.name,
         "gender": b.gender,
+        "age": b.age,
         "area": b.area,
         "datetime": b.preferred_datetime,
+        "area_2": b.area_2,
+        "datetime_2": b.datetime_2,
         "primary_type": b.primary_type,
         "status": b.status,
         "group_id": b.group_id,
@@ -185,66 +249,92 @@ def run_matching(x_admin_password: Optional[str] = Header(None), db: Session = D
     if not pending_users:
         return {"status": "success", "created_groups": 0, "message": "マッチング対象の未処理予約はありません"}
 
-    slots = defaultdict(list)
-    for u in pending_users:
-        raw_dt = u.preferred_datetime.replace('T', ' ')
-        dt_hour = raw_dt[:13] if len(raw_dt) >= 13 else raw_dt
-        
-        key = (u.area, dt_hour)
-        slots[key].append(u)
-
     created_groups_count = 0
     notified_users_count = 0
 
-    for (area, dt_hour), users in slots.items():
-        if len(users) < 3:
-            continue
+    # ----------------------------------------------------
+    # Phase 1: 第1希望のみでスロット化
+    # ----------------------------------------------------
+    slots_p1 = defaultdict(list)
+    for u in pending_users:
+        raw_dt = u.preferred_datetime.replace('T', ' ')
+        dt_hour = raw_dt[:13] if len(raw_dt) >= 13 else raw_dt
+        slots_p1[(u.area, dt_hour)].append(u)
 
-        type_buckets = defaultdict(list)
-        for u in users:
-            type_buckets[u.primary_type].append(u)
+    def process_matching_for_slots(slots_dict):
+        nonlocal created_groups_count, notified_users_count
+        for (area, dt_hour), users in slots_dict.items():
+            # pending状態のユーザーのみを対象に絞り込み
+            active_users = [u for u in users if u.status == "pending"]
+            if len(active_users) < 3:
+                continue
 
-        remaining_users = list(users)
+            # 4人組 ➡ 3人組の順でマッチング探索
+            for group_size in [4, 3]:
+                if len(active_users) < group_size:
+                    continue
 
-        while len(remaining_users) >= 3:
-            target_size = 4 if len(remaining_users) >= 4 else 3
-            group_members: List[BookingModel] = []
+                for combo in itertools.combinations(active_users, group_size):
+                    combo_list = list(combo)
+                    
+                    # すでに他の組み合わせで確定済みのユーザーが含まれていたらスキップ
+                    if any(u.status == "matched" for u in combo_list):
+                        continue
 
-            for t, bucket in list(type_buckets.items()):
-                if bucket and len(group_members) < target_size:
-                    selected = bucket.pop(0)
-                    group_members.append(selected)
-                    remaining_users.remove(selected)
+                    # ブラックリスト（同席履歴）チェック
+                    if has_met_before(db, combo_list):
+                        continue
 
-            while len(group_members) < target_size and remaining_users:
-                selected = remaining_users.pop(0)
-                group_members.append(selected)
-                if selected in type_buckets[selected.primary_type]:
-                    type_buckets[selected.primary_type].remove(selected)
+                    # 性別比・年齢差バランスチェック
+                    if not is_group_balanced(combo_list):
+                        continue
 
-            group_id = f"grp_{uuid.uuid4().hex[:8]}"
-            
-            for member in group_members:
-                member.status = "matched"
-                member.group_id = group_id
-                
-            created_groups_count += 1
+                    # 条件達成！グループ確定
+                    group_id = f"grp_{uuid.uuid4().hex[:8]}"
+                    for member in combo_list:
+                        member.status = "matched"
+                        member.group_id = group_id
 
-            # マッチング成立メンバーへ LINE 通知
-            for member in group_members:
-                msg = (
-                    f"🎉 【マッチング成立のお知らせ】\n\n"
-                    f"{member.name} 様\n\n"
-                    f"お待たせいたしました！食事会のマッチングが成立しました✨\n\n"
-                    f"■ 日時: {member.preferred_datetime.replace('T', ' ')}\n"
-                    f"■ エリア: {member.area}\n"
-                    f"■ グループID: {group_id}\n\n"
-                    f"当日の詳細案内や店舗情報は、追ってこちらのトーク画面にてご連絡いたします。"
-                )
-                if send_line_notification(member.user_id, msg):
-                    notified_users_count += 1
+                    db.commit()
+                    created_groups_count += 1
 
-    db.commit()
+                    # LINE通知
+                    for member in combo_list:
+                        msg = (
+                            f"🎉 【マッチング成立のお知らせ】\n\n"
+                            f"{member.name} 様\n\n"
+                            f"お待たせいたしました！食事会のマッチングが成立しました✨\n\n"
+                            f"■ 日時: {dt_hour}:00 頃\n"
+                            f"■ エリア: {area}\n"
+                            f"■ グループID: {group_id}\n\n"
+                            f"当日の詳細案内や店舗情報は、追ってこちらのトーク画面にてご連絡いたします。"
+                        )
+                        if send_line_notification(member.user_id, msg):
+                            notified_users_count += 1
+                    
+                    # 確定したメンバーを候補一覧から除外
+                    active_users = [u for u in active_users if u.status == "pending"]
+
+    # Phase 1 実行
+    process_matching_for_slots(slots_p1)
+
+    # ----------------------------------------------------
+    # Phase 2: 残ったユーザーで「第2希望」も含めたスロット化
+    # ----------------------------------------------------
+    remaining_stmt = select(BookingModel).where(BookingModel.status == "pending")
+    remaining_users = db.scalars(remaining_stmt).all()
+
+    if remaining_users:
+        slots_p2 = defaultdict(list)
+        for u in remaining_users:
+            # 第2希望が存在すればスロットにエントリー
+            if u.area_2 and u.datetime_2:
+                raw_dt_2 = u.datetime_2.replace('T', ' ')
+                dt_hour_2 = raw_dt_2[:13] if len(raw_dt_2) >= 13 else raw_dt_2
+                slots_p2[(u.area_2, dt_hour_2)].append(u)
+
+        # Phase 2 実行
+        process_matching_for_slots(slots_p2)
 
     return {
         "status": "success",
@@ -268,6 +358,7 @@ def get_matchings(x_admin_password: Optional[str] = Header(None), db: Session = 
             "user_id": b.user_id,
             "name": b.name,
             "gender": b.gender,
+            "age": b.age,
             "area": b.area,
             "datetime": b.preferred_datetime,
             "primary_type": b.primary_type
