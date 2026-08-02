@@ -29,7 +29,7 @@
         <div>
           <label class="block text-xs font-bold text-slate-600 mb-1">パスワード</label>
           <input type="password" id="admin-pass-input" required placeholder="管理者パスワードを入力" class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm outline-none">
-          <p id="login-error" class="text-xs text-red-500 mt-1 hidden">パスワードが違います</p>
+          <p id="login-error" class="text-xs text-red-500 mt-1 hidden">パスワードが正しくありません</p>
         </div>
         <button type="submit" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow transition">
           ログインする
@@ -44,7 +44,7 @@
     <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 bg-white p-6 rounded-2xl shadow-sm border border-slate-200 gap-4">
       <div>
         <h1 class="text-2xl font-bold flex items-center gap-2 text-slate-800">
-          <i class="fa-solid fa-gauge-high text-emerald-600"></i> 管理者ダッシュボード
+          <i class="fa-solid fa-gauge-high text-emerald-600"></i> 類人猿マッチング 管理パネル
         </h1>
         <p class="text-xs text-slate-500 mt-1">食事会マッチングの応募・自動マッチング管理</p>
       </div>
@@ -77,19 +77,18 @@
         <table class="w-full text-left border-collapse">
           <thead>
             <tr class="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
-              <th class="p-4">予約ID</th>
-              <th class="p-4">お名前</th>
-              <th class="p-4">性別</th>
-              <th class="p-4">希望エリア</th>
-              <th class="p-4">希望日時</th>
-              <th class="p-4">診断タイプ</th>
               <th class="p-4">ステータス</th>
+              <th class="p-4">ユーザー情報</th>
+              <th class="p-4">【第1希望】エリア / 日時</th>
+              <th class="p-4">【第2希望】エリア / 日時</th>
+              <th class="p-4">診断タイプ</th>
+              <th class="p-4">グループID</th>
               <th class="p-4">申込日時</th>
             </tr>
           </thead>
           <tbody id="bookings-tbody" class="divide-y divide-slate-100 text-sm">
             <tr>
-              <td colspan="8" class="p-8 text-center text-slate-400">データを読み込み中...</td>
+              <td colspan="7" class="p-8 text-center text-slate-400">データを読み込み中...</td>
             </tr>
           </tbody>
         </table>
@@ -112,8 +111,25 @@
     const loginForm = document.getElementById('login-form');
     const loginError = document.getElementById('login-error');
 
+    // エスケープ関数（XSS対策）
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
     function getSavedPassword() {
       return sessionStorage.getItem('ape_admin_password');
+    }
+
+    function handleAuthError() {
+      sessionStorage.removeItem('ape_admin_password');
+      loginError.classList.remove('hidden');
+      showLogin();
     }
 
     // 予約一覧の取得
@@ -122,55 +138,64 @@
       if (!password) return showLogin();
 
       const tbody = document.getElementById('bookings-tbody');
-      tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400">読み込み中...</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>読み込み中...</td></tr>`;
 
       try {
         const response = await fetch(`${API_BASE}/bookings`, {
           method: 'GET',
-          headers: { 
-            'X-Admin-Password': password 
-          }
+          headers: { 'X-Admin-Password': password }
         });
 
         if (response.status === 401) {
-          sessionStorage.removeItem('ape_admin_password');
-          loginError.classList.remove('hidden');
-          showLogin();
-          return;
+          return handleAuthError();
         }
 
         loginError.classList.add('hidden');
         const bookings = await response.json();
         hideLogin();
 
-        if (bookings.length === 0) {
-          tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-slate-400">現在、予約データはありません</td></tr>`;
+        if (!bookings || bookings.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-slate-400">現在、予約データはありません</td></tr>`;
           return;
         }
 
         tbody.innerHTML = '';
         bookings.forEach(b => {
           const statusBadge = b.status === 'matched' 
-            ? `<span class="px-2.5 py-1 bg-blue-100 text-blue-700 text-xs font-bold rounded-full">マッチ済み (${b.group_id})</span>`
-            : `<span class="px-2.5 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full">未マッチ</span>`;
+            ? `<span class="px-2.5 py-1 bg-blue-100 text-blue-700 text-xs font-bold rounded-full">完了 (${escapeHtml(b.status)})</span>`
+            : `<span class="px-2.5 py-1 bg-amber-100 text-amber-700 text-xs font-bold rounded-full">待機中 (${escapeHtml(b.status)})</span>`;
+
+          const genderText = b.gender === 'male' ? '男' : b.gender === 'female' ? '女' : escapeHtml(b.gender || '-');
+          const ageText = b.age ? `${escapeHtml(b.age)}歳` : '年齢未指定';
+          const primaryType = b.primary_type ? escapeHtml(b.primary_type) : '-';
 
           const tr = document.createElement('tr');
           tr.className = 'hover:bg-slate-50/80 transition-colors';
           tr.innerHTML = `
-            <td class="p-4 font-mono text-xs text-slate-500">${b.booking_id}</td>
-            <td class="p-4 font-bold text-slate-800">${b.name}</td>
-            <td class="p-4 text-slate-600">${b.gender}</td>
-            <td class="p-4 text-slate-600">${b.area}</td>
-            <td class="p-4 text-slate-600">${b.datetime ? b.datetime.replace('T', ' ') : '-'}</td>
-            <td class="p-4"><span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full">${b.primary_type}</span></td>
             <td class="p-4">${statusBadge}</td>
-            <td class="p-4 text-xs text-slate-400">${b.created_at || '-'}</td>
+            <td class="p-4">
+              <div class="font-bold text-slate-800">${escapeHtml(b.name)} <span class="text-xs text-slate-500 font-normal">(${ageText} / ${genderText})</span></div>
+              <div class="text-xs font-mono text-slate-400">ID: ${escapeHtml(b.user_id || b.booking_id)}</div>
+            </td>
+            <td class="p-4">
+              <span class="inline-block bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-xs font-bold mb-1">${escapeHtml(b.area)}</span>
+              <div class="text-xs font-mono text-slate-600">${b.datetime ? escapeHtml(b.datetime.replace('T', ' ')) : '-'}</div>
+            </td>
+            <td class="p-4">
+              ${b.area_2 ? `
+                <span class="inline-block bg-slate-100 text-slate-600 px-2 py-0.5 rounded text-xs font-bold mb-1">${escapeHtml(b.area_2)}</span>
+                <div class="text-xs font-mono text-slate-500">${b.datetime_2 ? escapeHtml(b.datetime_2.replace('T', ' ')) : '-'}</div>
+              ` : '<span class="text-slate-300 text-xs">なし</span>'}
+            </td>
+            <td class="p-4"><span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full">${primaryType}</span></td>
+            <td class="p-4 font-mono text-xs text-purple-600">${escapeHtml(b.group_id || '-')}</td>
+            <td class="p-4 text-xs text-slate-400">${escapeHtml(b.created_at || '-')}</td>
           `;
           tbody.appendChild(tr);
         });
       } catch (error) {
         console.error(error);
-        tbody.innerHTML = `<tr><td colspan="8" class="p-8 text-center text-red-500">データ取得に失敗しました。</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-red-500">データの取得に失敗しました。認証エラーまたは通信環境をご確認ください。</td></tr>`;
       }
     }
 
@@ -180,45 +205,50 @@
       if (!password) return showLogin();
 
       const container = document.getElementById('groups-container');
-      container.innerHTML = `<p class="col-span-2 text-center text-slate-400 p-8">グループデータを読み込み中...</p>`;
+      container.innerHTML = `<p class="col-span-2 text-center text-slate-400 p-8"><i class="fa-solid fa-spinner fa-spin mr-2"></i>グループデータを読み込み中...</p>`;
 
       try {
         const response = await fetch(`${API_BASE}/matchings`, {
           method: 'GET',
-          headers: { 
-            'X-Admin-Password': password 
-          }
+          headers: { 'X-Admin-Password': password }
         });
 
+        if (response.status === 401) {
+          return handleAuthError();
+        }
+
         const groups = await response.json();
-        if (groups.length === 0) {
+        if (!groups || groups.length === 0) {
           container.innerHTML = `<p class="col-span-2 text-center text-slate-400 p-8">まだ成立したマッチンググループはありません。</p>`;
           return;
         }
 
         container.innerHTML = '';
         groups.forEach(g => {
-          const firstMember = g.members[0];
+          const firstMember = g.members && g.members.length > 0 ? g.members[0] : {};
           const card = document.createElement('div');
           card.className = 'bg-white p-6 rounded-2xl shadow-sm border border-slate-200';
           
-          let memberListHtml = g.members.map(m => `
+          let memberListHtml = (g.members || []).map(m => `
             <div class="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
               <div>
-                <span class="font-bold text-slate-800">${m.name}</span>
-                <span class="text-xs text-slate-500 ml-2">(${m.gender})</span>
+                <span class="font-bold text-slate-800">${escapeHtml(m.name)}</span>
+                <span class="text-xs text-slate-500 ml-2">(${escapeHtml(m.age ? m.age + '歳' : '')} / ${escapeHtml(m.gender)})</span>
               </div>
-              <span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full">${m.primary_type}</span>
+              <span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full">${escapeHtml(m.primary_type || '-')}</span>
             </div>
           `).join('');
 
           card.innerHTML = `
             <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
               <div>
-                <span class="text-xs font-mono bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold">${g.group_id}</span>
-                <p class="text-xs text-slate-500 mt-1"><i class="fa-solid fa-location-dot"></i> ${firstMember.area} | <i class="fa-regular fa-clock"></i> ${firstMember.datetime ? firstMember.datetime.replace('T', ' ') : '-'}</p>
+                <span class="text-xs font-mono bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold">${escapeHtml(g.group_id)}</span>
+                <p class="text-xs text-slate-500 mt-1">
+                  <i class="fa-solid fa-location-dot"></i> ${escapeHtml(firstMember.area || '-')} | 
+                  <i class="fa-regular fa-clock"></i> ${firstMember.datetime ? escapeHtml(firstMember.datetime.replace('T', ' ')) : '-'}
+                </p>
               </div>
-              <span class="text-xs font-bold bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full">${g.members.length}名チーム</span>
+              <span class="text-xs font-bold bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full">${g.members ? g.members.length : 0}名チーム</span>
             </div>
             <div class="space-y-2">
               ${memberListHtml}
@@ -235,21 +265,35 @@
     // 自動マッチングを実行するボタンの処理
     document.getElementById('btn-run-match').addEventListener('click', async () => {
       const password = getSavedPassword();
-      if (!confirm('未マッチングの予約データから自動マッチングを実行しますか？')) return;
+      if (!password) return showLogin();
+
+      if (!confirm('未処分の予約データから自動マッチング処理を実行しますか？')) return;
+
+      const btn = document.getElementById('btn-run-match');
+      const originalHtml = btn.innerHTML;
 
       try {
+        btn.disabled = true;
+        btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 処理中...`;
+
         const response = await fetch(`${API_BASE}/matchings/run`, {
           method: 'POST',
-          headers: { 
-            'X-Admin-Password': password 
-          }
+          headers: { 'X-Admin-Password': password }
         });
+
+        if (response.status === 401) {
+          return handleAuthError();
+        }
+
         const res = await response.json();
-        alert(res.message);
+        alert(res.message || 'マッチング処理が完了しました');
         fetchBookings();
         fetchGroups();
       } catch (error) {
         alert('マッチング処理の実行に失敗しました');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalHtml;
       }
     });
 
@@ -294,6 +338,7 @@
 
     document.getElementById('btn-logout').addEventListener('click', () => {
       sessionStorage.removeItem('ape_admin_password');
+      document.getElementById('admin-pass-input').value = '';
       showLogin();
     });
 
