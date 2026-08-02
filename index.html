@@ -153,7 +153,27 @@
         </button>
       </div>
 
-      <!-- モーダルフォーム -->
+      <!-- A. すでに予約がある場合に表示する「予約状況カード」 -->
+      <div id="existing-booking-card" class="p-6 hidden">
+        <div class="bg-blue-50 border border-blue-200 rounded-xl p-5 mb-4">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-blue-800 bg-blue-100 px-2.5 py-1 rounded-full">予約受付済み</span>
+            <span class="text-xs text-slate-400 font-mono">ID: <span id="disp-booking-id"></span></span>
+          </div>
+          <p id="disp-status-text" class="text-base font-bold text-blue-700 mb-3">⏳ マッチング相手を探しています</p>
+          <hr class="border-blue-100 my-2">
+          <div class="space-y-1 text-sm text-slate-700">
+            <p><strong>【第1希望】</strong> <span id="disp-target-1"></span></p>
+            <p><strong>【第2希望】</strong> <span id="disp-target-2"></span></p>
+          </div>
+        </div>
+        <p class="text-xs text-slate-500 text-center mb-4">現在進行中の予約があるため、新規の送信はできません。</p>
+        <button id="btn-clear-booking" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold rounded-lg text-xs transition-colors">
+          表示をリセットして新しく予約し直す
+        </button>
+      </div>
+
+      <!-- B. 未予約時の入力フォーム -->
       <form id="booking-form" class="p-6 space-y-4">
         <!-- 基本情報 -->
         <div>
@@ -172,8 +192,8 @@
             </select>
           </div>
           <div>
-            <label class="block text-xs font-bold text-slate-600 mb-1">年齢 <span class="text-slate-400 text-[10px]">(任意)</span></label>
-            <input type="number" id="user-age" min="18" max="100" placeholder="例: 28" class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm outline-none">
+            <label class="block text-xs font-bold text-slate-600 mb-1">年齢（18歳以上） <span class="text-red-500">*</span></label>
+            <input type="number" id="user-age" min="18" max="100" required placeholder="20" class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 text-sm outline-none">
           </div>
         </div>
 
@@ -225,11 +245,34 @@
           <button type="button" id="btn-cancel-modal" class="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold rounded-lg text-sm transition-colors">
             キャンセル
           </button>
-          <button type="submit" id="btn-submit-booking" class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-sm shadow transition-all">
-            予約を送信する <i class="fa-solid fa-paper-plane ml-1"></i>
+          <button type="submit" id="btn-pre-submit" class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-lg text-sm shadow transition-all">
+            確認へ進む <i class="fa-solid fa-arrow-right ml-1"></i>
           </button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- C. 飲酒注意喚起モーダル（ポップアップ） -->
+  <div id="notice-modal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center border border-slate-100">
+      <div class="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-3 text-xl">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+      </div>
+      <h3 class="text-base font-bold text-slate-800 mb-3">ご参加に関する確認事項</h3>
+      <div class="text-xs text-slate-600 text-left space-y-2 mb-6 bg-red-50/70 p-3.5 rounded-xl border border-red-100 leading-relaxed">
+        <p>・20歳未満の方の飲酒は法律で禁止されています。</p>
+        <p>・お車・バイク・自転車でお越しの方の飲酒は固くお断りいたします。</p>
+        <p>・他のお客様へのご迷惑行為や強引な飲酒勧誘はお控えください。</p>
+      </div>
+      <div class="flex gap-2">
+        <button id="btn-notice-cancel" class="w-1/2 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-lg text-xs transition-colors">
+          戻る
+        </button>
+        <button id="btn-notice-agree" class="w-1/2 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg text-xs shadow transition-all">
+          同意して確定
+        </button>
+      </div>
     </div>
   </div>
 
@@ -308,6 +351,7 @@
       const quizScreen = document.getElementById('quiz-screen');
       const resultScreen = document.getElementById('result-screen');
       const bookingModal = document.getElementById('booking-modal');
+      const noticeModal = document.getElementById('notice-modal');
 
       const btnStart = document.getElementById('btn-start');
       const btnPrev = document.getElementById('btn-prev');
@@ -317,6 +361,11 @@
       const btnCloseModal = document.getElementById('btn-close-modal');
       const btnCancelModal = document.getElementById('btn-cancel-modal');
       const bookingForm = document.getElementById('booking-form');
+      const existingCard = document.getElementById('existing-booking-card');
+      const btnClearBooking = document.getElementById('btn-clear-booking');
+
+      const btnNoticeCancel = document.getElementById('btn-notice-cancel');
+      const btnNoticeAgree = document.getElementById('btn-notice-agree');
 
       const progressBar = document.getElementById('progress-bar');
       const progressText = document.getElementById('progress-text');
@@ -330,18 +379,57 @@
       btnNext.addEventListener('click', goToNextQuestion);
       btnRestart.addEventListener('click', restartQuiz);
 
-      // モーダル操作イベント
-      btnOpenBooking.addEventListener('click', () => bookingModal.classList.remove('hidden'));
+      // モーダル表示ロジック（予約状況のチェック）
+      btnOpenBooking.addEventListener('click', () => {
+        const savedBooking = JSON.parse(localStorage.getItem('active_ape_booking'));
+        if (savedBooking) {
+          // すでに予約がある場合
+          document.getElementById('disp-booking-id').textContent = savedBooking.booking_id;
+          document.getElementById('disp-target-1').textContent = `${savedBooking.area} / ${savedBooking.datetime.replace('T', ' ')}`;
+          document.getElementById('disp-target-2').textContent = savedBooking.area_2 ? `${savedBooking.area_2} / ${savedBooking.datetime_2.replace('T', ' ')}` : 'なし';
+          
+          bookingForm.classList.add('hidden');
+          existingCard.classList.remove('hidden');
+        } else {
+          // 未予約の場合
+          bookingForm.classList.remove('hidden');
+          existingCard.classList.add('hidden');
+        }
+        bookingModal.classList.remove('hidden');
+      });
+
       btnCloseModal.addEventListener('click', () => bookingModal.classList.add('hidden'));
       btnCancelModal.addEventListener('click', () => bookingModal.classList.add('hidden'));
 
-      // 予約フォーム送信イベント（FastAPIサーバーへ保存）
-      bookingForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
+      // 予約状態のリセットボタン
+      btnClearBooking.addEventListener('click', () => {
+        if (confirm('ローカルの予約表示をクリアしますか？（※DB側の予約は削除されません）')) {
+          localStorage.removeItem('active_ape_booking');
+          existingCard.classList.add('hidden');
+          bookingForm.classList.remove('hidden');
+        }
+      });
 
-        const submitBtn = document.getElementById('btn-submit-booking');
-        submitBtn.disabled = true;
-        submitBtn.textContent = '送信中...';
+      // フォーム一次チェック（注意喚起モーダル表示）
+      bookingForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const age = parseInt(document.getElementById('user-age').value, 10);
+        if (age < 18) {
+          alert('18歳未満の方はご参加いただけません。');
+          return;
+        }
+        noticeModal.classList.remove('hidden');
+      });
+
+      btnNoticeCancel.addEventListener('click', () => noticeModal.classList.add('hidden'));
+
+      // 最終送信（注意喚起で「同意して確定」をクリック時）
+      btnNoticeAgree.addEventListener('click', async () => {
+        noticeModal.classList.add('hidden');
+        
+        const preSubmitBtn = document.getElementById('btn-pre-submit');
+        preSubmitBtn.disabled = true;
+        preSubmitBtn.textContent = '送信中...';
 
         const ageVal = document.getElementById('user-age').value;
         const area2Val = document.getElementById('preferred-area-2').value;
@@ -351,7 +439,7 @@
           user_id: userId,
           name: document.getElementById('user-name').value,
           gender: document.getElementById('user-gender').value,
-          age: ageVal ? parseInt(ageVal, 10) : null,
+          age: parseInt(ageVal, 10),
           area: document.getElementById('preferred-area').value,
           datetime: document.getElementById('preferred-datetime').value,
           area_2: area2Val ? area2Val : null,
@@ -371,17 +459,27 @@
           }
 
           const resData = await response.json();
-          console.log('予約がDBに保存されました:', resData);
+          
+          // localStorageに予約情報を保存
+          const activeInfo = {
+            booking_id: resData.booking_id,
+            area: bookingData.area,
+            datetime: bookingData.datetime,
+            area_2: bookingData.area_2,
+            datetime_2: bookingData.datetime_2
+          };
+          localStorage.setItem('active_ape_booking', JSON.stringify(activeInfo));
 
           alert(`【仮予約完了】\n${bookingData.name} 様、食事会マッチングへのご応募を受け付けました！\n（予約ID: ${resData.booking_id}）`);
+          
           bookingModal.classList.add('hidden');
           bookingForm.reset();
         } catch (error) {
           console.error('予約エラー:', error);
           alert('予約の送信に失敗しました。時間をおいて再度お試しください。');
         } finally {
-          submitBtn.disabled = false;
-          submitBtn.innerHTML = '予約を送信する <i class="fa-solid fa-paper-plane ml-1"></i>';
+          preSubmitBtn.disabled = false;
+          preSubmitBtn.innerHTML = '確認へ進む <i class="fa-solid fa-arrow-right ml-1"></i>';
         }
       });
 
