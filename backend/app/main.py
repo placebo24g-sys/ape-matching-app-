@@ -76,26 +76,31 @@ class BookingModel(Base):
     group_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
-# テーブル作成
+# テーブル作成（存在しない場合のみ新規作成）
 Base.metadata.create_all(bind=engine)
 
 # --------------------------------------------------------
-# 【追加】既存DBに area_2, datetime_2 がない場合の自動追加処理
+# 【安全版】既存DBに area_2, datetime_2 カラムを追加する処理
 # --------------------------------------------------------
-with engine.connect() as conn:
-    try:
+try:
+    with engine.begin() as conn:
         if DATABASE_URL.startswith("sqlite"):
-            # SQLiteの場合
-            conn.execute(text("ALTER TABLE bookings ADD COLUMN area_2 VARCHAR;"))
-            conn.execute(text("ALTER TABLE bookings ADD COLUMN datetime_2 VARCHAR;"))
+            # SQLite用（カラム未存在時のみ個別追加）
+            try:
+                conn.execute(text("ALTER TABLE bookings ADD COLUMN area_2 VARCHAR;"))
+            except Exception:
+                pass
+            try:
+                conn.execute(text("ALTER TABLE bookings ADD COLUMN datetime_2 VARCHAR;"))
+            except Exception:
+                pass
         else:
-            # PostgreSQL (Render) の場合
+            # PostgreSQL (Render) 用
             conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS area_2 VARCHAR;"))
             conn.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS datetime_2 VARCHAR;"))
-        conn.commit()
-    except Exception as e:
-        # 既にカラムが存在する場合などのエラーをスキップ
-        print(f"[DB Auto Migration Note] {e}")
+    print("[DB Migration] Columns area_2 and datetime_2 verified successfully.")
+except Exception as e:
+    print(f"[DB Migration Warning] {e}")
 # --------------------------------------------------------
 
 def get_db():
