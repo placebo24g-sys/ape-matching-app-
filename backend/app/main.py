@@ -9,8 +9,16 @@ from collections import defaultdict
 from sqlalchemy import create_engine, String, Integer, Column, DateTime, func, select, update
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
 
-from linebot.v3 import MessagingApi
-from linebot.v3.messaging import Configuration, ApiClient, PushMessageRequest, TextMessage
+# ------------------------------------------
+# LINE SDK インポート（修正済み）
+# ------------------------------------------
+from linebot.v3.messaging import (
+    Configuration,
+    ApiClient,
+    MessagingApi,
+    PushMessageRequest,
+    TextMessage
+)
 
 # ==========================================
 # 1. データベース設定 (SQLAlchemy 2.0)
