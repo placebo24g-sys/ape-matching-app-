@@ -61,13 +61,13 @@ class BookingModel(Base):
     user_id: Mapped[str] = mapped_column(String)
     name: Mapped[str] = mapped_column(String)
     gender: Mapped[str] = mapped_column(String)
-    age: Mapped[Optional[int]] = mapped_column(Integer, nullable=True) # 追加: 年齢
+    age: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     
     # 第1希望
     area: Mapped[str] = mapped_column(String)
     preferred_datetime: Mapped[str] = mapped_column(String)
     
-    # 第2希望 (追加)
+    # 第2希望
     area_2: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     datetime_2: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     
@@ -115,12 +115,14 @@ def send_line_notification(to_user_id: str, message_text: str):
 # ==========================================
 app = FastAPI(title="類人猿マッチング API")
 
+# 【修正】CORS の詳細設定を追加し、すべてのリクエストとカスタムヘッダーを安全に通過させる
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ape_secret_pass_2026")
@@ -129,11 +131,11 @@ class BookingCreate(BaseModel):
     user_id: str
     name: str
     gender: str
-    age: Optional[int] = None                  # 追加: 年齢
+    age: Optional[int] = None
     area: str
     datetime: str
-    area_2: Optional[str] = None               # 追加: 第2希望エリア
-    datetime_2: Optional[str] = None           # 追加: 第2希望日時
+    area_2: Optional[str] = None
+    datetime_2: Optional[str] = None
     primary_type: Optional[str] = "gorilla"
 
 # ==========================================
@@ -143,7 +145,6 @@ def has_met_before(db: Session, candidate_users: List[BookingModel]) -> bool:
     """過去に同じ group_id でマッチング済みのペアが紛れていないか判定"""
     u_ids = [u.user_id for u in candidate_users]
     
-    # 過去にマッチング成立済みのデータを取得
     stmt = select(BookingModel).where(
         BookingModel.user_id.in_(u_ids),
         BookingModel.status == "matched",
@@ -151,12 +152,10 @@ def has_met_before(db: Session, candidate_users: List[BookingModel]) -> bool:
     )
     past_matches = db.scalars(stmt).all()
 
-    # グループIDごとにユーザーIDを集計
     groups = defaultdict(set)
     for m in past_matches:
         groups[m.group_id].add(m.user_id)
 
-    # 候補者の中に過去の同一グループ構成員が2人以上被っていれば True (同席NG)
     for g_users in groups.values():
         if len(set(u_ids).intersection(g_users)) >= 2:
             return True
@@ -164,7 +163,6 @@ def has_met_before(db: Session, candidate_users: List[BookingModel]) -> bool:
 
 def is_group_balanced(candidate_users: List[BookingModel]) -> bool:
     """性別比・年齢差のバランス判定"""
-    # 1. 性別比チェック (4人の場合: 男3人女1人・男1人女3人などの極端な偏りを回避)
     genders = [u.gender for u in candidate_users]
     males = genders.count("male")
     females = genders.count("female")
@@ -174,7 +172,6 @@ def is_group_balanced(candidate_users: List[BookingModel]) -> bool:
     if len(candidate_users) == 4 and (males == 1 and females == 3):
         return False
 
-    # 2. 年齢差チェック (入力者の中で最大差が15歳以上の場合はスキップ)
     ages = [u.age for u in candidate_users if u.age is not None]
     if len(ages) >= 2:
         if (max(ages) - min(ages)) > 15:
@@ -252,9 +249,7 @@ def run_matching(x_admin_password: Optional[str] = Header(None), db: Session = D
     created_groups_count = 0
     notified_users_count = 0
 
-    # ----------------------------------------------------
     # Phase 1: 第1希望のみでスロット化
-    # ----------------------------------------------------
     slots_p1 = defaultdict(list)
     for u in pending_users:
         raw_dt = u.preferred_datetime.replace('T', ' ')
@@ -264,12 +259,10 @@ def run_matching(x_admin_password: Optional[str] = Header(None), db: Session = D
     def process_matching_for_slots(slots_dict):
         nonlocal created_groups_count, notified_users_count
         for (area, dt_hour), users in slots_dict.items():
-            # pending状態のユーザーのみを対象に絞り込み
             active_users = [u for u in users if u.status == "pending"]
             if len(active_users) < 3:
                 continue
 
-            # 4人組 ➡ 3人組の順でマッチング探索
             for group_size in [4, 3]:
                 if len(active_users) < group_size:
                     continue
@@ -277,19 +270,15 @@ def run_matching(x_admin_password: Optional[str] = Header(None), db: Session = D
                 for combo in itertools.combinations(active_users, group_size):
                     combo_list = list(combo)
                     
-                    # すでに他の組み合わせで確定済みのユーザーが含まれていたらスキップ
                     if any(u.status == "matched" for u in combo_list):
                         continue
 
-                    # ブラックリスト（同席履歴）チェック
                     if has_met_before(db, combo_list):
                         continue
 
-                    # 性別比・年齢差バランスチェック
                     if not is_group_balanced(combo_list):
                         continue
 
-                    # 条件達成！グループ確定
                     group_id = f"grp_{uuid.uuid4().hex[:8]}"
                     for member in combo_list:
                         member.status = "matched"
@@ -298,7 +287,6 @@ def run_matching(x_admin_password: Optional[str] = Header(None), db: Session = D
                     db.commit()
                     created_groups_count += 1
 
-                    # LINE通知
                     for member in combo_list:
                         msg = (
                             f"🎉 【マッチング成立のお知らせ】\n\n"
@@ -312,28 +300,22 @@ def run_matching(x_admin_password: Optional[str] = Header(None), db: Session = D
                         if send_line_notification(member.user_id, msg):
                             notified_users_count += 1
                     
-                    # 確定したメンバーを候補一覧から除外
                     active_users = [u for u in active_users if u.status == "pending"]
 
-    # Phase 1 実行
     process_matching_for_slots(slots_p1)
 
-    # ----------------------------------------------------
-    # Phase 2: 残ったユーザーで「第2希望」も含めたスロット化
-    # ----------------------------------------------------
+    # Phase 2: 第2希望も含めたスロット化
     remaining_stmt = select(BookingModel).where(BookingModel.status == "pending")
     remaining_users = db.scalars(remaining_stmt).all()
 
     if remaining_users:
         slots_p2 = defaultdict(list)
         for u in remaining_users:
-            # 第2希望が存在すればスロットにエントリー
             if u.area_2 and u.datetime_2:
                 raw_dt_2 = u.datetime_2.replace('T', ' ')
                 dt_hour_2 = raw_dt_2[:13] if len(raw_dt_2) >= 13 else raw_dt_2
                 slots_p2[(u.area_2, dt_hour_2)].append(u)
 
-        # Phase 2 実行
         process_matching_for_slots(slots_p2)
 
     return {
