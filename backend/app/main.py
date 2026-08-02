@@ -1,14 +1,103 @@
-from fastapi import FastAPI, HTTPException, status, Header
+from fastapi import FastAPI, HTTPException, status, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
-import sqlite3
+import os
 import uuid
 from collections import defaultdict
 
+from sqlalchemy import create_engine, String, Integer, Column, DateTime, func, select, update
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
+
+from linebot.v3 import MessagingApi
+from linebot.v3.messaging import Configuration, ApiClient, PushMessageRequest, TextMessage
+
+# ==========================================
+# 1. データベース設定 (SQLAlchemy 2.0)
+# ==========================================
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ape_app.db")
+
+# Renderの postgres:// を postgresql:// に置換
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+
+engine = create_engine(
+    DATABASE_URL,
+    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+class Base(DeclarativeBase):
+    pass
+
+# テーブルモデル定義
+class ApeProfileModel(Base):
+    __tablename__ = "ape_profiles"
+
+    profile_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    primary_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    score_chimpanzee: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    score_bonobo: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    score_gorilla: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    score_orangutan: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    extraversion_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    achievement_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
+
+class BookingModel(Base):
+    __tablename__ = "bookings"
+
+    booking_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String)
+    name: Mapped[str] = mapped_column(String)
+    gender: Mapped[str] = mapped_column(String)
+    area: Mapped[str] = mapped_column(String)
+    preferred_datetime: Mapped[str] = mapped_column(String)
+    primary_type: Mapped[Optional[str]] = mapped_column(String, default="gorilla")
+    status: Mapped[str] = mapped_column(String, default="pending")
+    group_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
+
+# テーブル作成
+Base.metadata.create_all(bind=engine)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# ==========================================
+# 2. LINE Messaging API 設定
+# ==========================================
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+
+def send_line_notification(to_user_id: str, message_text: str):
+    """LINEユーザーに個別メッセージをプッシュ送信"""
+    if not LINE_CHANNEL_ACCESS_TOKEN:
+        print("[LINE Notice] LINE_CHANNEL_ACCESS_TOKEN が未設定のため通知をスキップしました")
+        return False
+    try:
+        configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
+        with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            push_message_request = PushMessageRequest(
+                to=to_user_id,
+                messages=[TextMessage(text=message_text)]
+            )
+            line_bot_api.push_message(push_message_request)
+        return True
+    except Exception as e:
+        print(f"[LINE Error] 送信失敗 ({to_user_id}): {e}")
+        return False
+
+# ==========================================
+# 3. FastAPI アプリケーション設定
+# ==========================================
 app = FastAPI(title="類人猿マッチング API")
 
-# CORS設定
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,55 +106,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-DB_PATH = "ape_app.db"
-ADMIN_PASSWORD = "ape_secret_pass_2026"
-
-# DB初期化
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS ape_profiles (
-            profile_id TEXT PRIMARY KEY,
-            user_id TEXT,
-            primary_type TEXT,
-            score_chimpanzee INTEGER,
-            score_bonobo INTEGER,
-            score_gorilla INTEGER,
-            score_orangutan INTEGER,
-            extraversion_score INTEGER,
-            achievement_score INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS bookings (
-            booking_id TEXT PRIMARY KEY,
-            user_id TEXT,
-            name TEXT,
-            gender TEXT,
-            area TEXT,
-            preferred_datetime TEXT,
-            primary_type TEXT,
-            status TEXT DEFAULT 'pending',
-            group_id TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    
-    cursor.execute("PRAGMA table_info(bookings)")
-    columns = [column[1] for column in cursor.fetchall()]
-    if 'status' not in columns:
-        cursor.execute("ALTER TABLE bookings ADD COLUMN status TEXT DEFAULT 'pending'")
-    if 'group_id' not in columns:
-        cursor.execute("ALTER TABLE bookings ADD COLUMN group_id TEXT")
-        
-    conn.commit()
-    conn.close()
-
-init_db()
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ape_secret_pass_2026")
 
 class BookingCreate(BaseModel):
     user_id: str
@@ -75,93 +116,77 @@ class BookingCreate(BaseModel):
     datetime: str
     primary_type: Optional[str] = "gorilla"
 
+# ------------------------------------------
+# API エンドポイント
+# ------------------------------------------
+
 @app.post("/api/bookings", status_code=status.HTTP_201_CREATED)
-def create_booking(booking: BookingCreate):
+def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
     booking_id = f"bk_{uuid.uuid4().hex[:8]}"
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    
+    new_booking = BookingModel(
+        booking_id=booking_id,
+        user_id=booking.user_id,
+        name=booking.name,
+        gender=booking.gender,
+        area=booking.area,
+        preferred_datetime=booking.datetime,
+        primary_type=booking.primary_type,
+        status="pending"
+    )
+    
     try:
-        cursor.execute("""
-            INSERT INTO bookings (booking_id, user_id, name, gender, area, preferred_datetime, primary_type, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
-        """, (
-            booking_id,
-            booking.user_id,
-            booking.name,
-            booking.gender,
-            booking.area,
-            booking.datetime,
-            booking.primary_type
-        ))
-        conn.commit()
+        db.add(new_booking)
+        db.commit()
+        db.refresh(new_booking)
     except Exception as e:
-        conn.rollback()
+        db.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        conn.close()
     
     return {"status": "success", "booking_id": booking_id, "message": "予約が保存されました"}
 
 @app.get("/api/bookings")
-def get_bookings(x_admin_password: Optional[str] = Header(None)):
+def get_bookings(x_admin_password: Optional[str] = Header(None), db: Session = Depends(get_db)):
     if x_admin_password != ADMIN_PASSWORD:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="パスワードが正しくありません")
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT booking_id, user_id, name, gender, area, preferred_datetime, primary_type, status, group_id, created_at FROM bookings ORDER BY created_at DESC")
-    rows = cursor.fetchall()
-    conn.close()
+    stmt = select(BookingModel).order_by(BookingModel.created_at.desc())
+    bookings = db.scalars(stmt).all()
 
-    bookings = []
-    for r in rows:
-        bookings.append({
-            "booking_id": r[0],
-            "user_id": r[1],
-            "name": r[2],
-            "gender": r[3],
-            "area": r[4],
-            "datetime": r[5],
-            "primary_type": r[6],
-            "status": r[7],
-            "group_id": r[8],
-            "created_at": r[9]
-        })
-    return bookings
+    return [{
+        "booking_id": b.booking_id,
+        "user_id": b.user_id,
+        "name": b.name,
+        "gender": b.gender,
+        "area": b.area,
+        "datetime": b.preferred_datetime,
+        "primary_type": b.primary_type,
+        "status": b.status,
+        "group_id": b.group_id,
+        "created_at": b.created_at.strftime("%Y-%m-%d %H:%M:%S") if b.created_at else None
+    } for b in bookings]
 
-# 3. 自動マッチング実行 API（1時間単位集約版）
 @app.post("/api/matchings/run")
-def run_matching(x_admin_password: Optional[str] = Header(None)):
+def run_matching(x_admin_password: Optional[str] = Header(None), db: Session = Depends(get_db)):
     if x_admin_password != ADMIN_PASSWORD:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="パスワードが正しくありません")
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT booking_id, name, gender, area, preferred_datetime, primary_type FROM bookings WHERE status = 'pending'")
-    pending_users = cursor.fetchall()
+    stmt = select(BookingModel).where(BookingModel.status == "pending")
+    pending_users = db.scalars(stmt).all()
 
     if not pending_users:
-        conn.close()
         return {"status": "success", "created_groups": 0, "message": "マッチング対象の未処理予約はありません"}
 
-    # エリア × 日付・時間（1時間単位）でグループ化
     slots = defaultdict(list)
     for u in pending_users:
-        raw_dt = u[4].replace('T', ' ')  # 例: "2026-08-08 23:02"
-        # 「YYYY-MM-DD HH」単位（最初の13文字）で集約
+        raw_dt = u.preferred_datetime.replace('T', ' ')
         dt_hour = raw_dt[:13] if len(raw_dt) >= 13 else raw_dt
         
-        key = (u[3], dt_hour)  # (area, dt_hour)
-        slots[key].append({
-            "booking_id": u[0],
-            "name": u[1],
-            "gender": u[2],
-            "primary_type": u[5],
-            "raw_datetime": u[4]
-        })
+        key = (u.area, dt_hour)
+        slots[key].append(u)
 
     created_groups_count = 0
+    notified_users_count = 0
 
     for (area, dt_hour), users in slots.items():
         if len(users) < 3:
@@ -169,13 +194,13 @@ def run_matching(x_admin_password: Optional[str] = Header(None)):
 
         type_buckets = defaultdict(list)
         for u in users:
-            type_buckets[u["primary_type"]].append(u)
+            type_buckets[u.primary_type].append(u)
 
         remaining_users = list(users)
 
         while len(remaining_users) >= 3:
             target_size = 4 if len(remaining_users) >= 4 else 3
-            group_members = []
+            group_members: List[BookingModel] = []
 
             for t, bucket in list(type_buckets.items()):
                 if bucket and len(group_members) < target_size:
@@ -186,48 +211,58 @@ def run_matching(x_admin_password: Optional[str] = Header(None)):
             while len(group_members) < target_size and remaining_users:
                 selected = remaining_users.pop(0)
                 group_members.append(selected)
-                if selected in type_buckets[selected["primary_type"]]:
-                    type_buckets[selected["primary_type"]].remove(selected)
+                if selected in type_buckets[selected.primary_type]:
+                    type_buckets[selected.primary_type].remove(selected)
 
             group_id = f"grp_{uuid.uuid4().hex[:8]}"
-            member_ids = [m["booking_id"] for m in group_members]
             
-            cursor.execute(
-                f"UPDATE bookings SET status = 'matched', group_id = ? WHERE booking_id IN ({','.join(['?']*len(member_ids))})",
-                [group_id] + member_ids
-            )
+            for member in group_members:
+                member.status = "matched"
+                member.group_id = group_id
+                
             created_groups_count += 1
 
-    conn.commit()
-    conn.close()
+            # マッチング成立メンバーへ LINE 通知
+            for member in group_members:
+                msg = (
+                    f"🎉 【マッチング成立のお知らせ】\n\n"
+                    f"{member.name} 様\n\n"
+                    f"お待たせいたしました！食事会のマッチングが成立しました✨\n\n"
+                    f"■ 日時: {member.preferred_datetime.replace('T', ' ')}\n"
+                    f"■ エリア: {member.area}\n"
+                    f"■ グループID: {group_id}\n\n"
+                    f"当日の詳細案内や店舗情報は、追ってこちらのトーク画面にてご連絡いたします。"
+                )
+                if send_line_notification(member.user_id, msg):
+                    notified_users_count += 1
+
+    db.commit()
 
     return {
         "status": "success",
         "created_groups": created_groups_count,
-        "message": f"{created_groups_count} 件のマッチンググループを作成しました"
+        "notified_users": notified_users_count,
+        "message": f"{created_groups_count} 件のグループを作成し、{notified_users_count} 名にLINE通知を送信しました。"
     }
 
 @app.get("/api/matchings")
-def get_matchings(x_admin_password: Optional[str] = Header(None)):
+def get_matchings(x_admin_password: Optional[str] = Header(None), db: Session = Depends(get_db)):
     if x_admin_password != ADMIN_PASSWORD:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="パスワードが正しくありません")
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT group_id, booking_id, name, gender, area, preferred_datetime, primary_type FROM bookings WHERE status = 'matched' ORDER BY group_id")
-    rows = cursor.fetchall()
-    conn.close()
+    stmt = select(BookingModel).where(BookingModel.status == "matched").order_by(BookingModel.group_id)
+    matched_bookings = db.scalars(stmt).all()
 
     groups = defaultdict(list)
-    for r in rows:
-        g_id = r[0]
-        groups[g_id].append({
-            "booking_id": r[1],
-            "name": r[2],
-            "gender": r[3],
-            "area": r[4],
-            "datetime": r[5],
-            "primary_type": r[6]
+    for b in matched_bookings:
+        groups[b.group_id].append({
+            "booking_id": b.booking_id,
+            "user_id": b.user_id,
+            "name": b.name,
+            "gender": b.gender,
+            "area": b.area,
+            "datetime": b.preferred_datetime,
+            "primary_type": b.primary_type
         })
 
     result = [{"group_id": g_id, "members": members} for g_id, members in groups.items()]
