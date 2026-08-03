@@ -202,10 +202,18 @@
         <!-- 第1希望 -->
         <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 space-y-3">
           <span class="text-xs font-bold text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full inline-block">【第1希望】必須</span>
+          
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">希望日程・開催枠 <span class="text-red-500">*</span></label>
+            <select id="preferred-datetime" required class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm outline-none bg-white">
+              <!-- JSで自動的に動的日付が入ります -->
+            </select>
+          </div>
+
           <div>
             <label class="block text-xs font-bold text-slate-600 mb-1">希望開催エリア <span class="text-red-500">*</span></label>
             <select id="preferred-area" required class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm outline-none bg-white">
-              <option value="" disabled selected>選択してください</option>
+              <option value="" disabled selected>エリアを選択してください</option>
               <option value="shinjuku">新宿</option>
               <option value="shibuya">渋谷</option>
               <option value="ebisu">恵比寿・中目黒</option>
@@ -213,16 +221,19 @@
               <option value="ikebukuro">池袋</option>
             </select>
           </div>
-
-          <div>
-            <label class="block text-xs font-bold text-slate-600 mb-1">希望日時 <span class="text-red-500">*</span></label>
-            <input type="datetime-local" id="preferred-datetime" required class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm outline-none bg-white">
-          </div>
         </div>
 
         <!-- 第2希望 -->
         <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 space-y-3">
           <span class="text-xs font-bold text-slate-600 bg-slate-200 px-2.5 py-0.5 rounded-full inline-block">【第2希望】任意（マッチング率アップ！）</span>
+          
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">第2希望日程</label>
+            <select id="preferred-datetime-2" class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm outline-none bg-white">
+              <!-- JSで自動的に動的日付が入ります -->
+            </select>
+          </div>
+
           <div>
             <label class="block text-xs font-bold text-slate-600 mb-1">第2希望エリア</label>
             <select id="preferred-area-2" class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm outline-none bg-white">
@@ -233,11 +244,6 @@
               <option value="ginza">銀座・有楽町</option>
               <option value="ikebukuro">池袋</option>
             </select>
-          </div>
-
-          <div>
-            <label class="block text-xs font-bold text-slate-600 mb-1">第2希望日時</label>
-            <input type="datetime-local" id="preferred-datetime-2" class="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm outline-none bg-white">
           </div>
         </div>
 
@@ -297,6 +303,71 @@
 
       // 最新の診断結果保持用
       let latestResult = null;
+
+      // -------------------------------------------------------------
+      // 💡 動的日程計算ロジック（毎週水曜 / 隔週金曜）
+      // -------------------------------------------------------------
+      function generateAutoDates() {
+        const options = [];
+        const today = new Date();
+        const baseFriday = new Date(2026, 7, 7); // 基準金曜日: 2026年8月7日(月=7)
+
+        for (let i = 0; i < 21; i++) {
+          const d = new Date();
+          d.setDate(today.getDate() + i);
+          const dayOfWeek = d.getDay();
+
+          // 毎週水曜日 (3)
+          if (dayOfWeek === 3) {
+            options.push(formatEventOption(d, "水曜夜枠 (19:30〜)"));
+          }
+
+          // 隔週金曜日 (5)
+          if (dayOfWeek === 5) {
+            const diffTime = d.getTime() - baseFriday.getTime();
+            const diffDays = Math.round(diffTime / (1000 * 3600 * 24));
+            if (diffDays % 14 === 0) {
+              options.push(formatEventOption(d, "金曜夜枠 (19:30〜)"));
+            }
+          }
+        }
+        return options;
+      }
+
+      function formatEventOption(dateObj, suffix) {
+        const year = dateObj.getFullYear();
+        const month = dateObj.getMonth() + 1;
+        const date = dateObj.getDate();
+        const dayName = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
+
+        // API保存用文字列 (例: 2026-08-12 19:30)
+        const ISO_Like = `${year}-${String(month).padStart(2, '0')}-${String(date).padStart(2, '0')}T19:30`;
+        const label = `${month}月${date}日(${dayName}) ${suffix}`;
+        return { value: ISO_Like, label: label };
+      }
+
+      function populateDateSelects() {
+        const dt1 = document.getElementById('preferred-datetime');
+        const dt2 = document.getElementById('preferred-datetime-2');
+        const dates = generateAutoDates();
+
+        if (dt1) {
+          dt1.innerHTML = '<option value="" disabled selected>参加希望の日程を選択してください</option>';
+          dates.forEach(d => {
+            dt1.innerHTML += `<option value="${d.value}">${d.label}</option>`;
+          });
+        }
+
+        if (dt2) {
+          dt2.innerHTML = '<option value="" selected>指定なし</option>';
+          dates.forEach(d => {
+            dt2.innerHTML += `<option value="${d.value}">${d.label}</option>`;
+          });
+        }
+      }
+
+      // 初期化処理で日程プルダウンを生成
+      populateDateSelects();
 
       // 質問データ（12問）
       const questions = [
