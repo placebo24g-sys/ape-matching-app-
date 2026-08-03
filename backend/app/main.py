@@ -147,7 +147,6 @@ def calculate_balance_score(group: List[BookingModel]) -> int:
     if type_counts["bonobo"] >= 1 or type_counts["gorilla"] >= 1:
         score += 20
 
-    # 年齢差ペナルティ（年齢差15歳以上で減点）
     ages = [u.age for u in group if u.age is not None]
     if len(ages) >= 2 and (max(ages) - min(ages)) > 15:
         score -= 50
@@ -155,7 +154,6 @@ def calculate_balance_score(group: List[BookingModel]) -> int:
     return max(score, 0)
 
 def has_met_before(db: Session, candidate_users: List[BookingModel]) -> bool:
-    """過去に同じグループでマッチング済みのペアを排除"""
     u_ids = [u.user_id for u in candidate_users]
     stmt = select(BookingModel).where(
         BookingModel.user_id.in_(u_ids),
@@ -202,6 +200,12 @@ class BookingCreate(BaseModel):
     extraversion_score: Optional[int] = 0
     achievement_score: Optional[int] = 0
 
+# --- 認証チェック補助関数 ---
+def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+    if x_admin_password != ADMIN_PASSWORD:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="パスワードが正しくありません")
+    return True
+
 # --- エンドポイント ---
 
 @app.post("/api/bookings", status_code=status.HTTP_201_CREATED)
@@ -235,15 +239,77 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
     return {"status": "success", "booking_id": booking_id, "message": "予約が保存されました"}
 
 
+# 💡 【追加】管理画面用：予約一覧取得 API (GET)
+@app.get("/api/bookings")
+def get_bookings(
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_admin)
+):
+    stmt = select(BookingModel).order_by(BookingModel.created_at.desc())
+    bookings = db.scalars(stmt).all()
+    
+    result = []
+    for b in bookings:
+        result.append({
+            "booking_id": b.booking_id,
+            "user_id": b.user_id,
+            "name": b.name,
+            "gender": b.gender,
+            "age": b.age,
+            "area": b.area,
+            "datetime": b.preferred_datetime,
+            "area_2": b.area_2,
+            "datetime_2": b.datetime_2,
+            "primary_type": b.primary_type,
+            "extraversion_score": b.extraversion_score,
+            "achievement_score": b.achievement_score,
+            "status": b.status,
+            "group_id": b.group_id,
+            "created_at": b.created_at.strftime("%Y-%m-%d %H:%M") if b.created_at else None
+        })
+    return result
+
+
+# 💡 【追加】管理画面用：成立グループ一覧取得 API (GET)
+@app.get("/api/matchings")
+def get_matchings(
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_admin)
+):
+    stmt = select(BookingModel).where(
+        BookingModel.status == "matched",
+        BookingModel.group_id.isnot(None)
+    )
+    matched_bookings = db.scalars(stmt).all()
+
+    groups_dict = defaultdict(list)
+    for b in matched_bookings:
+        groups_dict[b.group_id].append({
+            "booking_id": b.booking_id,
+            "user_id": b.user_id,
+            "name": b.name,
+            "gender": b.gender,
+            "age": b.age,
+            "area": b.area,
+            "datetime": b.preferred_datetime,
+            "primary_type": b.primary_type
+        })
+
+    result = []
+    for group_id, members in groups_dict.items():
+        result.append({
+            "group_id": group_id,
+            "members": members
+        })
+    return result
+
+
 @app.post("/api/matchings/run")
 def run_matching(
     match_mode: str = "BALANCE",
-    x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password"), 
+    _: bool = Depends(verify_admin),
     db: Session = Depends(get_db)
 ):
-    if x_admin_password != ADMIN_PASSWORD:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="パスワードが正しくありません")
-
     stmt = select(BookingModel).where(BookingModel.status == "pending")
     pending_users = db.scalars(stmt).all()
 
@@ -253,7 +319,6 @@ def run_matching(
     created_groups_count = 0
     notified_users_count = 0
 
-    # 日時・エリアごとのスロット化処理関数
     def process_slots(users_list: List[BookingModel], is_second_choice: bool = False):
         nonlocal created_groups_count, notified_users_count
         
@@ -300,12 +365,10 @@ def run_matching(
                             "b_ids": [m.booking_id for m in candidate]
                         })
 
-            # 高スコア順にソートして確定させる
             possible_groups.sort(key=lambda x: x["score"], reverse=True)
             used_b_ids = set()
 
             for g in possible_groups:
-                # 重複割り当て防止
                 if any(b_id in used_b_ids or db.get(BookingModel, b_id).status == "matched" for b_id in g["b_ids"]):
                     continue
 
@@ -318,7 +381,6 @@ def run_matching(
                 db.commit()
                 created_groups_count += 1
 
-                # LINE通知送信
                 for member in g["members"]:
                     msg = (
                         f"🎉 【マッチング成立のお知らせ】\n\n"
@@ -333,10 +395,8 @@ def run_matching(
                     if send_line_notification(member.user_id, msg):
                         notified_users_count += 1
 
-    # フェーズ1: 第1希望でマッチング
     process_slots(pending_users, is_second_choice=False)
 
-    # フェーズ2: 未マッチングユーザーを対象に第2希望で再マッチング
     remaining_users = db.scalars(select(BookingModel).where(BookingModel.status == "pending")).all()
     if remaining_users:
         process_slots(remaining_users, is_second_choice=True)
