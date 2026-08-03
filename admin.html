@@ -48,9 +48,21 @@
         </h1>
         <p class="text-xs text-slate-500 mt-1">食事会マッチングの応募・自動マッチング管理</p>
       </div>
-      <div class="flex flex-wrap gap-2">
+      
+      <!-- マッチングコントロール部 -->
+      <div class="flex flex-wrap items-center gap-2">
+        <div class="flex items-center bg-slate-50 border border-slate-300 rounded-xl px-3 py-1.5">
+          <label for="match-mode-select" class="text-xs font-bold text-slate-600 mr-2 whitespace-nowrap">
+            <i class="fa-solid fa-sliders text-slate-400 mr-1"></i>モード:
+          </label>
+          <select id="match-mode-select" class="bg-transparent text-xs font-bold text-slate-800 outline-none cursor-pointer">
+            <option value="BALANCE">バランス重視 (4タイプ分散)</option>
+            <option value="SAME_TYPE">同タイプ重視 (同じタイプ同士)</option>
+          </select>
+        </div>
+
         <button id="btn-run-match" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition shadow flex items-center gap-2">
-          <i class="fa-solid fa-wand-magic-sparkles"></i> 自動マッチング実行
+          <i class="fa-solid fa-wand-magic-sparkles"></i> マッチング実行
         </button>
         <button id="btn-refresh" class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition shadow flex items-center gap-2">
           <i class="fa-solid fa-rotate-right"></i> 更新
@@ -262,12 +274,15 @@
       }
     }
 
-    // 自動マッチングを実行するボタンの処理
+    // 自動マッチングを実行するボタンの処理（モード対応）
     document.getElementById('btn-run-match').addEventListener('click', async () => {
       const password = getSavedPassword();
       if (!password) return showLogin();
 
-      if (!confirm('未処分の予約データから自動マッチング処理を実行しますか？')) return;
+      const matchMode = document.getElementById('match-mode-select').value;
+      const modeLabel = matchMode === 'SAME_TYPE' ? '【同タイプ重視】' : '【バランス重視】';
+
+      if (!confirm(`${modeLabel} モードで自動マッチング処理を実行しますか？`)) return;
 
       const btn = document.getElementById('btn-run-match');
       const originalHtml = btn.innerHTML;
@@ -276,7 +291,8 @@
         btn.disabled = true;
         btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 処理中...`;
 
-        const response = await fetch(`${API_BASE}/matchings/run`, {
+        // URLパラメータに match_mode を載せてPOSTリクエスト
+        const response = await fetch(`${API_BASE}/matchings/run?match_mode=${matchMode}`, {
           method: 'POST',
           headers: { 'X-Admin-Password': password }
         });
