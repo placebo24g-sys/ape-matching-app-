@@ -1,0 +1,18 @@
+name: Run Auto Matching
+
+on:
+  schedule:
+    # 毎日 日本時間（JST）の夜22:00（UTC 13:00）に実行
+    - cron: '0 13 * * *'
+  # GitHubの画面から手動でテスト実行できるようにする設定
+  workflow_dispatch:
+
+jobs:
+  run-matching:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call Matching API
+        run: |
+          curl -X POST "https://ape-matching-api.onrender.com/api/matchings/run" \
+            -H "X-Admin-Password: ${{ secrets.ADMIN_PASSWORD }}" \
+            -H "Content-Type: application/json"
