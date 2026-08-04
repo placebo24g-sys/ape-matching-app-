@@ -48,7 +48,7 @@ class ApeProfileModel(Base):
 class BookingModel(Base):
     __tablename__ = "bookings"
 
-    booking_id: Mapped[str] = mapped_column(String, primary_key=True)
+    booking_id: Mapped[str] = mapped_column(String, primary_primary=True if False else False, primary_key=True)
     user_id: Mapped[str] = mapped_column(String)
     name: Mapped[str] = mapped_column(String)
     gender: Mapped[str] = mapped_column(String)
@@ -101,26 +101,41 @@ def send_line_notification(to_user_id: str, message_text: str):
         return False
 
 # ==========================================
-# 3. マッチングコアスコアリング機能
+# 3. マッチングコアスコアリング機能（ハイブリッド化）
 # ==========================================
+
+# 💡【判定ロジック】ユーザーの「尖り度（タイプ特徴）」をチェックする
+def is_specialist(user: BookingModel) -> bool:
+    """外向性や達成度などのスコアが高く、特徴が際立っているか判定"""
+    e_score = user.extraversion_score or 0
+    a_score = user.achievement_score or 0
+    return (e_score >= 70 or a_score >= 70)
+
 def calculate_same_type_score(group: List[BookingModel]) -> int:
-    types = [m.primary_type for m in group]
+    """【同族重視】全員のタイプが同じ＋テンション（外向性・達成度）が近いほど高得点"""
+    types = [(m.primary_type or "gorilla").lower() for m in group]
     first_type = types[0]
     
+    # タイプが揃っていない場合はスコア極小
     if not all(t == first_type for t in types):
         return 0
     
     score = 100
+    # 尖りタイプ（スペシャリスト）が含まれている場合、さらに加点
+    specialist_count = sum(1 for m in group if is_specialist(m))
+    score += specialist_count * 10
+
     e_scores = [m.extraversion_score or 0 for m in group]
     a_scores = [m.achievement_score or 0 for m in group]
     
     diff_e = max(e_scores) - min(e_scores)
     diff_a = max(a_scores) - min(a_scores)
     
-    score -= (diff_e + diff_a) * 5
+    score -= (diff_e + diff_a) * 3
     return max(score, 1)
 
 def calculate_balance_score(group: List[BookingModel]) -> int:
+    """【バランス盛り上がり重視】多様なタイプ＋クッション役（ゴリラ・ボノボ）混ざりで高得点"""
     type_counts = {"chimpanzee": 0, "bonobo": 0, "gorilla": 0, "orangutan": 0}
     for m in group:
         t = (m.primary_type or "gorilla").lower()
@@ -139,11 +154,13 @@ def calculate_balance_score(group: List[BookingModel]) -> int:
     else:
         score += 10
 
+    # 極端な組み合わせの減点
     if type_counts["chimpanzee"] >= 3:
         score -= 40
     if type_counts["orangutan"] >= 3:
         score -= 40
 
+    # 盛り上げ役と聞き手の黄金比率加点
     if type_counts["bonobo"] >= 1 or type_counts["gorilla"] >= 1:
         score += 20
 
@@ -152,6 +169,24 @@ def calculate_balance_score(group: List[BookingModel]) -> int:
         score -= 50
 
     return max(score, 0)
+
+# 💡【ハイブリッド処理】同族型・バランス型を評価し、ベストなマッチング形式とスコアを返す
+def calculate_hybrid_score(group: List[BookingModel], mode: str = "AUTO") -> tuple[int, str]:
+    same_score = calculate_same_type_score(group)
+    balance_score = calculate_balance_score(group)
+
+    if mode == "SAME_TYPE":
+        return same_score, "同族重視"
+    elif mode == "BALANCE":
+        return balance_score, "バランス重視"
+    else:
+        # AUTOモード: 同族として完璧（80点以上）なら同族重視、それ以外はバランス重視で高い方を採用
+        if same_score >= 80:
+            return same_score, "同族重視"
+        elif balance_score >= same_score:
+            return balance_score, "バランス重視"
+        else:
+            return same_score, "同族重視"
 
 def has_met_before(db: Session, candidate_users: List[BookingModel]) -> bool:
     u_ids = [u.user_id for u in candidate_users]
@@ -239,7 +274,7 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
     return {"status": "success", "booking_id": booking_id, "message": "予約が保存されました"}
 
 
-# 💡 【追加】管理画面用：予約一覧取得 API (GET)
+# 管理画面用：予約一覧取得 API (GET)
 @app.get("/api/bookings")
 def get_bookings(
     db: Session = Depends(get_db),
@@ -270,7 +305,7 @@ def get_bookings(
     return result
 
 
-# 💡 【追加】管理画面用：成立グループ一覧取得 API (GET)
+# 管理画面用：成立グループ一覧取得 API (GET)
 @app.get("/api/matchings")
 def get_matchings(
     db: Session = Depends(get_db),
@@ -306,7 +341,7 @@ def get_matchings(
 
 @app.post("/api/matchings/run")
 def run_matching(
-    match_mode: str = "BALANCE",
+    match_mode: str = "AUTO",  # AUTO（自動判定・ミックス）, SAME_TYPE, BALANCE
     _: bool = Depends(verify_admin),
     db: Session = Depends(get_db)
 ):
@@ -356,11 +391,13 @@ def run_matching(
                     if has_met_before(db, candidate):
                         continue
 
-                    score = calculate_same_type_score(candidate) if match_mode == "SAME_TYPE" else calculate_balance_score(candidate)
+                    # 💡 ミックスド判定スコアを適用
+                    score, matched_type_label = calculate_hybrid_score(candidate, mode=match_mode)
                     
                     if score > 0:
                         possible_groups.append({
                             "score": score,
+                            "matched_type_label": matched_type_label,
                             "members": candidate,
                             "b_ids": [m.booking_id for m in candidate]
                         })
@@ -381,6 +418,7 @@ def run_matching(
                 db.commit()
                 created_groups_count += 1
 
+                # 通知メッセージの作成
                 for member in g["members"]:
                     msg = (
                         f"🎉 【マッチング成立のお知らせ】\n\n"
@@ -388,15 +426,17 @@ def run_matching(
                         f"お食事会のマッチングが成立しました✨\n\n"
                         f"■ 日時: {dt_hour}:00 頃\n"
                         f"■ エリア: {area}\n"
-                        f"■ マッチングタイプ: {'同族重視' if match_mode == 'SAME_TYPE' else 'バランス重視'}\n"
+                        f"■ マッチングタイプ: {g['matched_type_label']}\n"
                         f"■ グループID: {group_id}\n\n"
                         f"当日の店舗案内は追ってご連絡いたします。"
                     )
                     if send_line_notification(member.user_id, msg):
                         notified_users_count += 1
 
+    # 第1希望で処理
     process_slots(pending_users, is_second_choice=False)
 
+    # 余った人で第2希望処理
     remaining_users = db.scalars(select(BookingModel).where(BookingModel.status == "pending")).all()
     if remaining_users:
         process_slots(remaining_users, is_second_choice=True)
