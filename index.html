@@ -8,7 +8,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- FontAwesome Fonts Icons -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <!-- html2canvas CDN (画像保存機能用) -->
+  <!-- html2canvas CDN (画像保存・共有機能用) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap');
@@ -87,7 +87,7 @@
     <!-- 結果画面 -->
     <div id="result-screen" class="hidden">
       
-      <!-- 画像化・キャプチャ対象のカード（id="result-card"） -->
+      <!-- キャプチャ対象のカード（id="result-card"） -->
       <div id="result-card" class="bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-100 mb-6">
         <!-- タイプヘッダー -->
         <div id="result-header" class="p-8 text-center text-white bg-emerald-600">
@@ -127,14 +127,14 @@
 
       <!-- アクションボタン群 -->
       <div class="flex flex-col sm:flex-row flex-wrap gap-3 justify-center items-center">
-        <!-- 画像として保存ボタン -->
+        <!-- 画像でシェア・保存ボタン（Web Share API ＋ html2canvas） -->
         <button id="btn-download-img" class="w-full sm:w-auto px-5 py-3.5 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-2">
-          <i class="fa-solid fa-download"></i> 結果を画像保存
+          <i class="fa-solid fa-share-nodes"></i> 画像で共有・保存
         </button>
 
-        <!-- X（旧Twitter）シェアボタン -->
+        <!-- X（旧Twitter）テキスト投稿ボタン（140文字対応済み） -->
         <a id="btn-share-x" href="#" target="_blank" rel="noopener noreferrer" class="w-full sm:w-auto px-5 py-3.5 bg-black hover:bg-slate-800 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-2">
-          <i class="fa-brands fa-x-twitter text-lg"></i> 結果を投稿する
+          <i class="fa-brands fa-x-twitter text-lg"></i> テキストで投稿
         </a>
 
         <!-- 食事会予約ボタン -->
@@ -397,30 +397,56 @@
       btnNext.addEventListener('click', goToNextQuestion);
       btnRestart.addEventListener('click', restartQuiz);
 
-      // 画像保存ロジック (html2canvas)
+      // Web Share API ＋ html2canvas による画像共有・保存処理
       btnDownloadImg.addEventListener('click', async () => {
         const cardElement = document.getElementById('result-card');
         btnDownloadImg.disabled = true;
-        btnDownloadImg.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 画像生成中...';
+        btnDownloadImg.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 生成中...';
 
         try {
+          // html2canvasでカードを画像（Canvas）化
           const canvas = await html2canvas(cardElement, {
-            scale: 2, // 高解像度出力
+            scale: 2,
             useCORS: true,
             backgroundColor: '#ffffff'
           });
 
-          const image = canvas.toDataURL('image/png');
-          const link = document.createElement('a');
-          link.href = image;
-          link.download = `類人猿診断結果_${latestResult ? latestResult.primaryType : 'result'}.png`;
-          link.click();
+          // CanvasをBlob（ファイルデータ）に変換
+          canvas.toBlob(async (blob) => {
+            if (!blob) throw new Error('Blob生成失敗');
+            
+            const typeName = latestResult ? typeMaster[latestResult.primaryType].name : '診断結果';
+            const file = new File([blob], `類人猿診断_${typeName}.png`, { type: 'image/png' });
+
+            // スマホなど Web Share API が画像共有に対応している場合
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+              try {
+                await navigator.share({
+                  files: [file],
+                  title: '類人猿タイプ診断結果',
+                  text: `私の診断結果は【${typeName}】でした！ #類人猿診断`
+                });
+                return;
+              } catch (shareErr) {
+                if (shareErr.name === 'AbortError') return; // キャンセル時
+              }
+            }
+
+            // PCなど Web Share 未対応環境の場合（フォールバック：普通に保存して案内）
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = `類人猿診断結果_${latestResult ? latestResult.primaryType : 'result'}.png`;
+            link.click();
+
+            alert('診断結果画像をダウンロードしました！\nX（Twitter）投稿時にこの画像を添付して投稿してください。');
+          }, 'image/png');
+
         } catch (err) {
-          console.error('画像生成に失敗しました:', err);
-          alert('画像の保存に失敗しました。');
+          console.error('画像共有エラー:', err);
+          alert('画像の生成に失敗しました。');
         } finally {
           btnDownloadImg.disabled = false;
-          btnDownloadImg.innerHTML = '<i class="fa-solid fa-download"></i> 結果を画像保存';
+          btnDownloadImg.innerHTML = '<i class="fa-solid fa-share-nodes"></i> 画像で共有・保存';
         }
       });
 
@@ -622,8 +648,8 @@
         document.getElementById('result-catchphrase').textContent = mainTypeInfo.catchphrase;
         document.getElementById('result-description').textContent = mainTypeInfo.description;
 
-        const axisEIText = latestResult.scoreE >= latestResult.scoreI ? `感情表現型 (E: ${latestResult.scoreE}pt)` : `感情抑制型 (I: ${latestResult.scoreI}pt)`;
-        const axisAGText = latestResult.scoreA >= latestResult.scoreG ? `成果指向型 (A: ${latestResult.scoreA}pt)` : `安寧・調和型 (G: ${latestResult.scoreG}pt)`;
+        const axisEIText = latestResult.scoreE >= latestResult.scoreI ? `感情表現型 (E:${latestResult.scoreE}pt)` : `感情抑制型 (I:${latestResult.scoreI}pt)`;
+        const axisAGText = latestResult.scoreA >= latestResult.scoreG ? `成果指向型 (A:${latestResult.scoreA}pt)` : `安寧・調和型 (G:${latestResult.scoreG}pt)`;
 
         document.getElementById('axis-e-i').textContent = axisEIText;
         document.getElementById('axis-a-g').textContent = axisAGText;
@@ -647,18 +673,17 @@
           scoreBreakdown.appendChild(row);
         });
 
-        // X（Twitter）シェアリンクの生成
+        // X（Twitter）テキスト投稿リンクの生成（140文字以内に安全に収める調整）
         const shareBtn = document.getElementById('btn-share-x');
+        const shortHashtags = '類人猿診断,自己分析';
         const shareText = `【類人猿タイプ診断結果】\n` +
           `私のタイプは「${mainTypeInfo.name}」でした！\n` +
-          `〜${mainTypeInfo.catchphrase}〜\n\n` +
-          `📊 診断軸の分析：\n` +
+          `（${mainTypeInfo.catchphrase}）\n\n` +
           `・感情表現：${axisEIText}\n` +
           `・欲求指向：${axisAGText}\n\n` +
-          `${mainTypeInfo.matchPhrase}と一緒に参加できる食事会も開催中🍴✨\n` +
-          `あなたは何タイプ？診断してみてね！\n`;
+          `あなたは何タイプ？診断してみてね👇\n`;
 
-        shareBtn.setAttribute('href', `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(window.location.href)}&hashtags=${encodeURIComponent(mainTypeInfo.hashtags)}`);
+        shareBtn.setAttribute('href', `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(window.location.href)}&hashtags=${encodeURIComponent(shortHashtags)}`);
 
         try {
           await fetch(API_URL, {
