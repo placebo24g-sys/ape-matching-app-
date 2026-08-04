@@ -127,7 +127,7 @@
 
       <!-- アクションボタン群 -->
       <div class="flex flex-col md:flex-row gap-3 justify-center items-center">
-        <!-- 💡 追加: X（旧Twitter）シェアボタン -->
+        <!-- X（旧Twitter）シェアボタン -->
         <a id="btn-share-x" href="#" target="_blank" rel="noopener noreferrer" class="w-full md:w-auto px-6 py-3.5 bg-black hover:bg-slate-800 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all duration-200 transform hover:-translate-y-0.5 flex items-center justify-center gap-2">
           <i class="fa-brands fa-x-twitter text-lg"></i> 結果を投稿する
         </a>
@@ -394,25 +394,37 @@
           name: 'チンパンジー型',
           catchphrase: '勝ち気に挑む情熱のチャレンジャー',
           description: '感情表現が豊かで、成果や勝ち負けにこだわるエネルギッシュなタイプ。高い目標に向かってチームを牽引する力がありますが、時に積極的すぎる面も。',
-          color: 'bg-red-500'
+          headerBg: 'bg-red-600',
+          badgeBg: 'bg-red-500',
+          matchPhrase: 'エネルギッシュで切磋琢磨できる相性の良いタイプ',
+          hashtags: '類人猿診断,類人猿タイプ診断,チンパンジー型,自己分析'
         },
         BONOBO: {
           name: 'ボノボ型',
           catchphrase: '共感と調和を愛するムードメーカー',
           description: '感情表現が豊かで、みんなとの共感や人間関係の調和を最も重視するタイプ。雰囲気を明るくし、チームの連帯感を高めるのが得意です。',
-          color: 'bg-pink-500'
+          headerBg: 'bg-pink-600',
+          badgeBg: 'bg-pink-500',
+          matchPhrase: '明るく共感し合える相性の良いタイプ',
+          hashtags: '類人猿診断,類人猿タイプ診断,ボノボ型,自己分析'
         },
         GORILLA: {
           name: 'ゴリラ型',
           catchphrase: '安心と平和を守る頼れる守護者',
           description: '感情を表に強く出さず、秩序や平和、確実なプロセスを重視するタイプ。安定感があり、周囲に安心感を与える信頼できる存在です。',
-          color: 'bg-amber-600'
+          headerBg: 'bg-amber-600',
+          badgeBg: 'bg-amber-500',
+          matchPhrase: '穏やかで安定感のある相性の良いタイプ',
+          hashtags: '類人猿診断,類人猿タイプ診断,ゴリラ型,自己分析'
         },
         ORANGUTAN: {
           name: 'オランウータン型',
           catchphrase: '独自の世界で真理を探求するスペシャリスト',
           description: '感情をあまり表に出さず、自分のペースや納得感を大切にしながら成果や課題解決に向き合うタイプ。論理的で職人的な深い思考力を持ちます。',
-          color: 'bg-blue-600'
+          headerBg: 'bg-blue-600',
+          badgeBg: 'bg-blue-500',
+          matchPhrase: 'マイペースに深く語り合える相性の良いタイプ',
+          hashtags: '類人猿診断,類人猿タイプ診断,オランウータン型,自己分析'
         }
       };
 
@@ -696,48 +708,83 @@
         latestResult = calculateScores();
         const mainTypeInfo = typeMaster[latestResult.primaryType];
 
+        // ヘッダーデザインの同期
+        const resultHeader = document.getElementById('result-header');
+        resultHeader.className = `p-8 text-center text-white ${mainTypeInfo.headerBg}`;
+
         document.getElementById('result-type-name').textContent = mainTypeInfo.name;
         document.getElementById('result-catchphrase').textContent = mainTypeInfo.catchphrase;
         document.getElementById('result-description').textContent = mainTypeInfo.description;
 
-        document.getElementById('axis-e-i').textContent = 
-          latestResult.scoreE > latestResult.scoreI ? `感情表現型 (E: ${latestResult.scoreE}pt)` : `感情抑制型 (I: ${latestResult.scoreI}pt)`;
+        // 軸テキストの更新
+        const axisEIText = latestResult.scoreE >= latestResult.scoreI 
+          ? `感情表現型 (E: ${latestResult.scoreE}pt)` 
+          : `感情抑制型 (I: ${latestResult.scoreI}pt)`;
 
-        document.getElementById('axis-a-g').textContent = 
-          latestResult.scoreA > latestResult.scoreG ? `成果指向型 (A: ${latestResult.scoreA}pt)` : `安寧・調和型 (G: ${latestResult.scoreG}pt)`;
+        const axisAGText = latestResult.scoreA >= latestResult.scoreG 
+          ? `成果指向型 (A: ${latestResult.scoreA}pt)` 
+          : `安寧・調和型 (G: ${latestResult.scoreG}pt)`;
 
-        const breakdownContainer = document.getElementById('score-breakdown');
-        breakdownContainer.innerHTML = '';
+        document.getElementById('axis-e-i').textContent = axisEIText;
+        document.getElementById('axis-a-g').textContent = axisAGText;
 
-        Object.keys(typeMaster).forEach(key => {
-          const type = typeMaster[key];
-          const percentage = latestResult.profiles[key] || 0;
+        // 比率プログレスバーの描画
+        const scoreBreakdown = document.getElementById('score-breakdown');
+        scoreBreakdown.innerHTML = '';
+
+        const typeKeys = ['CHIMPANZEE', 'BONOBO', 'GORILLA', 'ORANGUTAN'];
+        typeKeys.forEach(key => {
+          const info = typeMaster[key];
+          const pct = latestResult.profiles[key];
+          const isMain = key === latestResult.primaryType;
 
           const row = document.createElement('div');
           row.className = 'space-y-1';
           row.innerHTML = `
-            <div class="flex justify-between text-xs font-bold text-slate-600">
-              <span>${type.name}</span>
-              <span>${percentage}%</span>
+            <div class="flex justify-between text-xs font-semibold text-slate-600">
+              <span class="${isMain ? 'font-bold text-slate-800' : ''}">${info.name}</span>
+              <span>${pct}%</span>
             </div>
             <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-              <div class="${type.color} h-2 rounded-full transition-all duration-500" style="width: ${percentage}%"></div>
+              <div class="${info.badgeBg} h-2 rounded-full transition-all duration-500" style="width: ${pct}%"></div>
             </div>
           `;
-          breakdownContainer.appendChild(row);
+          scoreBreakdown.appendChild(row);
         });
 
-        // -------------------------------------------------------------
-        // 💡 修正・追加: X（旧Twitter）シェアURLの動的生成
-        // -------------------------------------------------------------
+        // 💡 X（旧Twitter）シェアURLの動的生成（全タイプ共通・詳細文面）
         const shareBtn = document.getElementById('btn-share-x');
         const currentUrl = window.location.href;
-        
-        const shareText = `【類人猿タイプ診断結果】\n私のタイプは「${mainTypeInfo.name}」でした！\n〜${mainTypeInfo.catchphrase}〜\n\n同じタイプ（または相性抜群のタイプ）と一緒にご飯に行ける食事会に参加してみる？✨\n`;
-        const hashtags = "類人猿診断,類人猿タイプ診断,マッチング食事会";
 
-        const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(currentUrl)}&hashtags=${encodeURIComponent(hashtags)}`;
+        const shareText = `【類人猿タイプ診断結果】\n` +
+          `私のタイプは「${mainTypeInfo.name}」でした！\n` +
+          `〜${mainTypeInfo.catchphrase}〜\n\n` +
+          `📊 診断軸の分析：\n` +
+          `・感情表現：${axisEIText}\n` +
+          `・欲求指向：${axisAGText}\n\n` +
+          `${mainTypeInfo.matchPhrase}と一緒に参加できる食事会も開催中🍴✨\n` +
+          `あなたは何タイプ？診断してみてね！\n`;
+
+        const twitterIntentUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(currentUrl)}&hashtags=${encodeURIComponent(mainTypeInfo.hashtags)}`;
         shareBtn.setAttribute('href', twitterIntentUrl);
+
+        // APIへプロファイル保存（非同期処理）
+        try {
+          await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              user_id: userId,
+              primary_type: latestResult.primaryType.toLowerCase(),
+              score_e: latestResult.scoreE,
+              score_i: latestResult.scoreI,
+              score_a: latestResult.scoreA,
+              score_g: latestResult.scoreG
+            })
+          });
+        } catch (err) {
+          console.warn('プロファイル自動更新スキップ:', err);
+        }
       }
     });
   </script>
