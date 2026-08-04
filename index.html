@@ -1,523 +1,683 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>類人猿タイプ別 コミュニケーション＆適職診断</title>
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- FontAwesome CDN -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <style>
-        .fade-in {
-            animation: fadeIn 0.5s ease-in-out forwards;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>類人猿タイプ診断（12問版）</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- FontAwesome Fonts Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <!-- html2canvas CDN (画像保存機能用) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&display=swap');
+    body {
+      font-family: 'Noto Sans JP', sans-serif;
+    }
+  </style>
 </head>
-<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans antialiased">
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col relative">
 
-    <!-- Header -->
-    <header class="bg-amber-800 text-white shadow-md">
-        <div class="max-w-4xl mx-auto px-4 py-4 flex justify-between items-center">
-            <h1 class="text-xl font-bold flex items-center gap-2">
-                <i class="fa-solid fa-brain"></i>
-                <span>類人猿タイプ診断</span>
-            </h1>
-            <button id="reset-btn" class="hidden text-xs bg-amber-700 hover:bg-amber-600 px-3 py-1.5 rounded transition">
-                最初からやり直す
-            </button>
-        </div>
-    </header>
+  <!-- ヘッダー -->
+  <header class="bg-gradient-to-r from-emerald-600 to-teal-700 text-white shadow-md">
+    <div class="max-w-3xl mx-auto px-4 py-6 text-center">
+      <h1 class="text-2xl md:text-3xl font-bold tracking-wide flex items-center justify-center gap-2">
+        <i class="fa-solid fa-paw"></i> 類人猿タイプ診断
+      </h1>
+      <p class="text-emerald-100 text-sm mt-1">12の質問であなたの行動特性とチームでの役割を分析します</p>
+    </div>
+  </header>
 
-    <!-- Main Container -->
-    <main class="flex-1 max-w-4xl w-full mx-auto p-4 md:p-6">
-        
-        <!-- Intro Screen -->
-        <section id="intro-screen" class="bg-white rounded-xl shadow-sm p-6 md:p-8 text-center fade-in">
-            <div class="inline-block p-4 bg-amber-50 rounded-full mb-4">
-                <i class="fa-solid fa-paw text-4xl text-amber-800"></i>
-            </div>
-            <h2 class="text-2xl font-bold text-slate-900 mb-3">あなたの「本来の強み」と「人間関係の癖」を知る</h2>
-            <p class="text-slate-600 mb-6 leading-relaxed max-w-xl mx-auto">
-                大型類人猿（チンパンジー・ボノボ・ゴリラ・オランウータン）の行動特性に基づいた思考・行動パターンの診断です。12の質問に答えることで、あなたのコミュニケーション傾向と適した仕事スタイルを分析します。
-            </p>
-            <button id="start-btn" class="bg-amber-800 hover:bg-amber-900 text-white font-bold px-8 py-3.5 rounded-lg shadow-md transition transform active:scale-95 text-lg">
-                診断をスタートする（約2分）
-            </button>
-        </section>
+  <!-- メインコンテンツ -->
+  <main class="flex-grow max-w-3xl w-full mx-auto px-4 py-8">
 
-        <!-- Quiz Screen -->
-        <section id="quiz-screen" class="hidden bg-white rounded-xl shadow-sm p-6 md:p-8 fade-in">
-            <!-- Progress Bar -->
-            <div class="mb-6">
-                <div class="flex justify-between text-xs text-slate-500 mb-1">
-                    <span id="progress-text">質問 1 / 12</span>
-                    <span id="progress-percent">8%</span>
-                </div>
-                <div class="w-full bg-slate-100 rounded-full h-2">
-                    <div id="progress-bar" class="bg-amber-700 h-2 rounded-full transition-all duration-300" style="width: 8%"></div>
-                </div>
-            </div>
-
-            <!-- Question Text -->
-            <h3 id="question-text" class="text-xl font-bold text-slate-900 mb-6 leading-snug">
-                <!-- Question content dynamically inserted -->
-            </h3>
-
-            <!-- Options Container -->
-            <div id="options-container" class="space-y-3">
-                <!-- Options dynamically inserted -->
-            </div>
-        </section>
-
-        <!-- Result Screen -->
-        <section id="result-screen" class="hidden space-y-6 fade-in">
-            <!-- Main Type Banner -->
-            <div class="bg-white rounded-xl shadow-sm overflow-hidden">
-                <div class="p-6 md:p-8 text-center bg-gradient-to-b from-amber-50 to-white">
-                    <span class="text-sm font-semibold text-amber-800 tracking-widest uppercase mb-1 block">あなたの類人猿タイプ</span>
-                    <h2 id="result-title" class="text-3xl md:text-4xl font-extrabold text-slate-900 mb-3">---</h2>
-                    <p id="result-subtitle" class="text-lg text-slate-600 max-w-xl mx-auto font-medium">---</p>
-                </div>
-
-                <div class="p-6 md:p-8 border-t border-slate-100 space-y-6">
-                    <!-- Axis Analysis Bar -->
-                    <div>
-                        <h4 class="font-bold text-slate-900 mb-4 flex items-center gap-2">
-                            <i class="fa-solid fa-chart-simple text-amber-800"></i>
-                            <span>思考バランス指標</span>
-                        </h4>
-                        <div class="space-y-4 max-w-lg mx-auto bg-slate-50 p-4 rounded-lg">
-                            <!-- Axis 1 -->
-                            <div>
-                                <div class="flex justify-between text-xs font-semibold text-slate-600 mb-1">
-                                    <span>感情重視 (ボノボ/ゴリラ)</span>
-                                    <span>論理・成果重視 (チンパンジー/オランウータン)</span>
-                                </div>
-                                <div class="w-full bg-slate-200 rounded-full h-2.5">
-                                    <div id="axis1-bar" class="bg-amber-700 h-2.5 rounded-full transition-all duration-500" style="width: 50%"></div>
-                                </div>
-                            </div>
-                            <!-- Axis 2 -->
-                            <div>
-                                <div class="flex justify-between text-xs font-semibold text-slate-600 mb-1">
-                                    <span>外交的/活発 (チンパンジー/ボノボ)</span>
-                                    <span>内向的/安定 (ゴリラ/オランウータン)</span>
-                                </div>
-                                <div class="w-full bg-slate-200 rounded-full h-2.5">
-                                    <div id="axis2-bar" class="bg-amber-700 h-2.5 rounded-full transition-all duration-500" style="width: 50%"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Characteristics -->
-                    <div>
-                        <h4 class="font-bold text-slate-900 mb-2 flex items-center gap-2">
-                            <i class="fa-solid fa-user-tag text-amber-800"></i>
-                            <span>特徴・強み</span>
-                        </h4>
-                        <p id="result-desc" class="text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-lg">---</p>
-                    </div>
-
-                    <!-- Suitable Roles -->
-                    <div>
-                        <h4 class="font-bold text-slate-900 mb-2 flex items-center gap-2">
-                            <i class="fa-solid fa-briefcase text-amber-800"></i>
-                            <span>適した役割・仕事スタイル</span>
-                        </h4>
-                        <p id="result-jobs" class="text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-lg">---</p>
-                    </div>
-
-                    <!-- Communication Tips -->
-                    <div>
-                        <h4 class="font-bold text-slate-900 mb-2 flex items-center gap-2">
-                            <i class="fa-solid fa-comments text-amber-800"></i>
-                            <span>人間関係・コミュニケーションのアドバイス</span>
-                        </h4>
-                        <p id="result-tips" class="text-slate-600 leading-relaxed bg-slate-50 p-4 rounded-lg">---</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Action Section -->
-            <div class="bg-white rounded-xl shadow-sm p-6 text-center space-y-4">
-                <h3 class="font-bold text-lg text-slate-900">診断結果を共有・保存</h3>
-                <div class="flex justify-center gap-3 flex-wrap">
-                    <button id="share-x-btn" class="bg-black hover:bg-slate-800 text-white font-medium px-5 py-2.5 rounded-lg flex items-center gap-2 transition text-sm">
-                        <i class="fa-brands fa-x-twitter"></i>
-                        <span>Xで共有する</span>
-                    </button>
-                    <button id="reservation-modal-open" class="bg-amber-800 hover:bg-amber-900 text-white font-medium px-5 py-2.5 rounded-lg flex items-center gap-2 transition text-sm">
-                        <i class="fa-regular fa-calendar-check"></i>
-                        <span>個別フィードバックを予約</span>
-                    </button>
-                </div>
-            </div>
-        </section>
-
-    </main>
-
-    <!-- Modal for Reservation -->
-    <div id="reservation-modal" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
-        <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-xl relative fade-in">
-            <button id="modal-close" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600">
-                <i class="fa-solid fa-xmark text-xl"></i>
-            </button>
-            <h3 class="text-xl font-bold text-slate-900 mb-2">個別フィードバック予約</h3>
-            <p class="text-sm text-slate-600 mb-4">診断結果を元に、オンライン（Zoom）にて個別キャリア相談を受け付けます。</p>
-            
-            <form id="reservation-form" class="space-y-4">
-                <div>
-                    <label class="block text-xs font-bold text-slate-700 mb-1">お名前 <span class="text-red-500">*</span></label>
-                    <input type="text" required class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-amber-800" placeholder="山田 太郎">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold text-slate-700 mb-1">メールアドレス <span class="text-red-500">*</span></label>
-                    <input type="email" required class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-amber-800" placeholder="example@email.com">
-                </div>
-                <div>
-                    <label class="block text-xs font-bold text-slate-700 mb-1">ご希望日程 <span class="text-red-500">*</span></label>
-                    <select id="date-select" required class="w-full border border-slate-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-amber-800 bg-white">
-                        <!-- Dynamically populated -->
-                    </select>
-                </div>
-                <button type="submit" class="w-full bg-amber-800 hover:bg-amber-900 text-white font-bold py-2.5 rounded-lg transition text-sm">
-                    予約内容を送信する
-                </button>
-            </form>
-        </div>
+    <!-- スタート画面 -->
+    <div id="start-screen" class="bg-white rounded-2xl shadow-lg p-6 md:p-10 text-center border border-slate-100">
+      <div class="w-24 h-24 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-6 text-4xl shadow-inner">
+        <i class="fa-solid fa-users"></i>
+      </div>
+      <h2 class="text-xl md:text-2xl font-bold mb-4 text-slate-800">あなたの「類人猿タイプ」を発見しましょう</h2>
+      <p class="text-slate-600 text-sm md:text-base mb-8 leading-relaxed text-left md:text-center">
+        人は思考や行動のパターンによって、**チンパンジー・ボノボ・ゴリラ・オランウータン**の4タイプに分類されます。<br class="hidden md:inline">
+        直感で自分に最も当てはまるものを選択してください。
+      </p>
+      <button id="btn-start" class="w-full md:w-auto px-10 py-4 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-lg hover:shadow-xl transition-all duration-200 transform hover:-translate-y-0.5 active:translate-y-0">
+        診断を開始する <i class="fa-solid fa-arrow-right ml-2"></i>
+      </button>
     </div>
 
-    <!-- Footer -->
-    <footer class="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-500 mt-auto">
-        &copy; 類人猿タイプ別診断 All Rights Reserved.
-    </footer>
+    <!-- 診断質問画面 -->
+    <div id="quiz-screen" class="hidden">
+      <!-- 進捗バー -->
+      <div class="bg-white rounded-xl shadow-sm p-4 mb-6 border border-slate-100">
+        <div class="flex justify-between items-center text-xs font-semibold text-slate-500 mb-2">
+          <span>進捗状況</span>
+          <span id="progress-text" class="text-emerald-600">1 / 12</span>
+        </div>
+        <div class="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
+          <div id="progress-bar" class="bg-emerald-500 h-2.5 rounded-full transition-all duration-300 w-[8.33%]"></div>
+        </div>
+      </div>
 
-    <!-- Logic Script -->
-    <script>
-        // Diagnostic Data Definition
-        const questions = [
-            {
-                text: "問題が発生した時、まず優先することは？",
-                options: [
-                    { text: "素早く行動して解決策を実行に移す", type: "chimpanzee" },
-                    { text: "周囲の気持ちや人間関係に配慮して調整する", type: "bonobo" },
-                    { text: "従来のやり方やマニュアルに沿って確実に処理する", type: "gorilla" },
-                    { text: "客観的なデータや原因をじっくり分析する", type: "orangutan" }
-                ]
-            },
-            {
-                text: "チームや集団の中でのあなたのポジションは？",
-                options: [
-                    { text: "みんなを引っ張るリーダー役・目標設定役", type: "chimpanzee" },
-                    { text: "雰囲気を和らげるムードメーカー・仲裁役", type: "bonobo" },
-                    { text: "黙々と役割を果たす信頼のおけるサポート役", type: "gorilla" },
-                    { text: "一歩引いた視点から意見を述べる専門家役", type: "orangutan" }
-                ]
-            },
-            {
-                text: "仕事や作業を進める上で、最もモチベーションが上がる瞬間は？",
-                options: [
-                    { text: "高い目標を達成した時や勝利・成果を得た時", type: "chimpanzee" },
-                    { text: "周囲から感謝されたり、一体感を感じた時", type: "bonobo" },
-                    { text: "ミスなく計画通りに作業を完了できた時", type: "gorilla" },
-                    { text: "新しいノウハウを習得したり、仕組みを深く理解できた時", type: "orangutan" }
-                ]
-            },
-            {
-                text: "他人からの評価で一番嬉しい言葉は？",
-                options: [
-                    { text: "「さすが！成果を出してくれて頼りになるね」", type: "chimpanzee" },
-                    { text: "「あなたがいるとみんなが笑顔になって助かるよ」", type: "bonobo" },
-                    { text: "「いつも正確で安心して任せられるよ」", type: "gorilla" },
-                    { text: "「専門的な知識・技術が本当に素晴らしいね」", type: "orangutan" }
-                ]
-            },
-            {
-                text: "ストレスを感じやすい状況はどのような時？",
-                options: [
-                    { text: "自分のペースで進められず、成果が出ない時", type: "chimpanzee" },
-                    { text: "人間関係がぎくしゃくしていたり、無視される時", type: "bonobo" },
-                    { text: "急な変更やマナー・ルールを守らない人がいる時", type: "gorilla" },
-                    { text: "根拠のない指示に従わされたり、思考を邪魔される時", type: "orangutan" }
-                ]
-            },
-            {
-                text: "休日の過ごし方の傾向は？",
-                options: [
-                    { text: "アクティブに出かけたり、新しい体験に挑戦する", type: "chimpanzee" },
-                    { text: "友人や家族と集まって会話やイベントを楽しむ", type: "bonobo" },
-                    { text: "慣れ親しんだいつもの場所で穏やかに過ごす", type: "gorilla" },
-                    { text: "自分の趣味や興味のある分野の探求に没頭する", type: "orangutan" }
-                ]
-            },
-            {
-                text: "意見の対立が起きた場合、どう対応することが多い？",
-                options: [
-                    { text: "自分の主張の妥当性を訴え、相手を納得させる", type: "chimpanzee" },
-                    { text: "お互いの妥協点を探り、雰囲気が悪くならないよう努める", type: "bonobo" },
-                    { text: "場の空気を見極め、全体の決定に無理なく従う", type: "gorilla" },
-                    { text: "感情的にならず、論理的な正しさに基づいて判断する", type: "orangutan" }
-                ]
-            },
-            {
-                text: "新しい企画やプロジェクトを始めるとき、最初に考えることは？",
-                options: [
-                    { text: "どんな成果（ゴール）が得られるか", type: "chimpanzee" },
-                    { text: "誰と一緒にやると楽しそうか", type: "bonobo" },
-                    { text: "リスクや懸念事項がないか、手順は明確か", type: "gorilla" },
-                    { text: "どのような理論や技術に基づいているか", type: "orangutan" }
-                ]
-            },
-            {
-                text: "コミュニケーションにおいて意識していることは？",
-                options: [
-                    { text: "結論から簡潔に伝えること", type: "chimpanzee" },
-                    { text: "相手の気持ちに共感し、共感を示すこと", type: "bonobo" },
-                    { text: "相手の立場を尊重し、礼儀正しくすること", type: "gorilla" },
-                    { text: "事実に基づき、正確な情報を伝えること", type: "orangutan" }
-                ]
-            },
-            {
-                text: "褒められた時の反応として一番近いものは？",
-                options: [
-                    { text: "素直に喜び、次の目標に意欲を燃やす", type: "chimpanzee" },
-                    { text: "「みんなのおかげです」と周囲に感謝する", type: "bonobo" },
-                    { text: "謙虚に受け止め、これからも継続しようと思う", type: "gorilla" },
-                    { text: "内心満足しつつも、客観的なフィードバックとして評価する", type: "orangutan" }
-                ]
-            },
-            {
-                text: "意思決定をする際のスピードと基準は？",
-                options: [
-                    { text: "直感と成果の見込みに基づき、素早く決める", type: "chimpanzee" },
-                    { text: "周りの意見を聞きながら、みんなが納得する方向で決める", type: "bonobo" },
-                    { text: "前例や安全性を考慮し、慎重に決める", type: "gorilla" },
-                    { text: "十分な情報を集め、論理的に分析してから決める", type: "orangutan" }
-                ]
-            },
-            {
-                text: "あなたにとって「理想の職場環境」とは？",
-                options: [
-                    { text: "個人の成果や実力が正当に評価される刺激的な職場", type: "chimpanzee" },
-                    { text: "アットホームでチームワークが良く、雰囲気が温かい職場", type: "bonobo" },
-                    { text: "ルールや役割が明確で、落ち着いて作業に集中できる職場", type: "gorilla" },
-                    { text: "自分の専門性を深められ、無駄な干渉がない静かな職場", type: "orangutan" }
-                ]
+      <!-- 質問カード -->
+      <div class="bg-white rounded-2xl shadow-lg p-6 md:p-8 border border-slate-100 mb-6">
+        <span id="question-category" class="inline-block px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-semibold rounded-full mb-3">
+          感情表現
+        </span>
+        <h3 id="question-text" class="text-lg md:text-xl font-bold text-slate-800 mb-6 leading-snug">
+          質問文がここに入ります
+        </h3>
+
+        <!-- 選択肢 -->
+        <div id="options-container" class="space-y-3"></div>
+      </div>
+
+      <!-- ナビゲーションボタン -->
+      <div class="flex justify-between items-center">
+        <button id="btn-prev" class="px-5 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold rounded-lg text-sm transition-colors duration-200 disabled:opacity-40 disabled:cursor-not-allowed">
+          <i class="fa-solid fa-chevron-left mr-1"></i> 前へ
+        </button>
+        <button id="btn-next" disabled class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-semibold rounded-lg text-sm transition-all duration-200 disabled:opacity-40 disabled:cursor-not-allowed shadow">
+          次へ <i class="fa-solid fa-chevron-right ml-1"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- 結果画面 -->
+    <div id="result-screen" class="hidden">
+      
+      <!-- 画像化・キャプチャ対象のカード（id="result-card"） -->
+      <div id="result-card" class="bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-100 mb-6">
+        <!-- タイプヘッダー -->
+        <div id="result-header" class="p-8 text-center text-white bg-emerald-600">
+          <p class="text-emerald-100 text-xs font-bold uppercase tracking-widest mb-1">Your Diagnosis Result</p>
+          <h2 id="result-type-name" class="text-3xl md:text-4xl font-extrabold mb-2">―</h2>
+          <p id="result-catchphrase" class="text-emerald-100 text-sm md:text-base font-medium">―</p>
+        </div>
+
+        <div class="p-6 md:p-8 space-y-8">
+          <!-- タイプ解説 -->
+          <div>
+            <h4 class="text-base font-bold text-slate-800 border-l-4 border-emerald-500 pl-3 mb-3">タイプの特徴</h4>
+            <p id="result-description" class="text-slate-600 text-sm md:text-base leading-relaxed bg-slate-50 p-4 rounded-xl border border-slate-100">
+              ―
+            </p>
+          </div>
+
+          <!-- スコア内訳 -->
+          <div>
+            <h4 class="text-base font-bold text-slate-800 border-l-4 border-emerald-500 pl-3 mb-4">4タイプの構成比率</h4>
+            <div id="score-breakdown" class="space-y-3"></div>
+          </div>
+
+          <!-- 軸の分析 -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200/60">
+              <span class="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">感情表現の軸</span>
+              <p id="axis-e-i" class="font-bold text-slate-700">―</p>
+            </div>
+            <div class="bg-slate-50 p-4 rounded-xl border border-slate-200/60">
+              <span class="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">欲求指向の軸</span>
+              <p id="axis-a-g" class="font-bold text-slate-700">―</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- アクションボタン群 -->
+      <div class="flex flex-col sm:flex-row flex-wrap gap-3 justify-center items-center">
+        <!-- 画像として保存ボタン -->
+        <button id="btn-download-img" class="w-full sm:w-auto px-5 py-3.5 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-2">
+          <i class="fa-solid fa-download"></i> 結果を画像保存
+        </button>
+
+        <!-- X（旧Twitter）シェアボタン -->
+        <a id="btn-share-x" href="#" target="_blank" rel="noopener noreferrer" class="w-full sm:w-auto px-5 py-3.5 bg-black hover:bg-slate-800 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-2">
+          <i class="fa-brands fa-x-twitter text-lg"></i> 結果を投稿する
+        </a>
+
+        <!-- 食事会予約ボタン -->
+        <button id="btn-open-booking" class="w-full sm:w-auto px-5 py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-2">
+          <i class="fa-solid fa-calendar-check"></i> 食事会を予約する
+        </button>
+
+        <!-- 再診断ボタン -->
+        <button id="btn-restart" class="w-full sm:w-auto px-4 py-3.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-xl transition-all duration-200 flex items-center justify-center gap-2">
+          <i class="fa-solid fa-rotate-right"></i> もう一度
+        </button>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- 食事会予約モーダル -->
+  <div id="booking-modal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-y-auto max-h-[90vh] border border-slate-100 transform transition-all">
+      <div class="bg-emerald-600 px-6 py-4 text-white flex justify-between items-center sticky top-0 z-10">
+        <h3 class="text-lg font-bold flex items-center gap-2">
+          <i class="fa-solid fa-utensils"></i> 食事会マッチング参加予約
+        </h3>
+        <button id="btn-close-modal" class="text-emerald-100 hover:text-white text-xl focus:outline-none">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div id="existing-booking-card" class="p-6 hidden">
+        <div class="bg-blue-50 border border-blue-200 rounded-xl p-5 mb-4">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-blue-800 bg-blue-100 px-2.5 py-1 rounded-full">予約受付済み</span>
+            <span class="text-xs text-slate-400 font-mono">ID: <span id="disp-booking-id"></span></span>
+          </div>
+          <p id="disp-status-text" class="text-base font-bold text-blue-700 mb-3">⏳ マッチング相手を探しています</p>
+          <hr class="border-blue-100 my-2">
+          <div class="space-y-1 text-sm text-slate-700">
+            <p><strong>【第1希望】</strong> <span id="disp-target-1"></span></p>
+            <p><strong>【第2希望】</strong> <span id="disp-target-2"></span></p>
+          </div>
+        </div>
+        <p class="text-xs text-slate-500 text-center mb-4">現在進行中の予約があるため、新規の送信はできません。</p>
+        <button id="btn-clear-booking" class="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold rounded-lg text-xs transition-colors">
+          表示をリセットして新しく予約し直す
+        </button>
+      </div>
+
+      <form id="booking-form" class="p-6 space-y-4">
+        <div>
+          <label class="block text-xs font-bold text-slate-600 mb-1">お名前（またはニックネーム） <span class="text-red-500">*</span></label>
+          <input type="text" id="user-name" required placeholder="例: 山田 太郎" class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm outline-none">
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">性別 <span class="text-red-500">*</span></label>
+            <select id="user-gender" required class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm outline-none">
+              <option value="" disabled selected>選択</option>
+              <option value="male">男性</option>
+              <option value="female">女性</option>
+              <option value="other">その他・指定なし</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">年齢（18歳以上） <span class="text-red-500">*</span></label>
+            <input type="number" id="user-age" min="18" max="100" required placeholder="20" class="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-emerald-500 text-sm outline-none">
+          </div>
+        </div>
+
+        <hr class="border-slate-100 my-2">
+
+        <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 space-y-3">
+          <span class="text-xs font-bold text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full inline-block">【第1希望】必須</span>
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">希望日程・開催枠 <span class="text-red-500">*</span></label>
+            <select id="preferred-datetime" required class="w-full px-4 py-2 rounded-lg border border-slate-300 text-sm outline-none bg-white"></select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">希望開催エリア <span class="text-red-500">*</span></label>
+            <select id="preferred-area" required class="w-full px-4 py-2 rounded-lg border border-slate-300 text-sm outline-none bg-white">
+              <option value="" disabled selected>エリアを選択してください</option>
+              <option value="shinjuku">新宿</option>
+              <option value="shibuya">渋谷</option>
+              <option value="ebisu">恵比寿・中目黒</option>
+              <option value="ginza">銀座・有楽町</option>
+              <option value="ikebukuro">池袋</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 space-y-3">
+          <span class="text-xs font-bold text-slate-600 bg-slate-200 px-2.5 py-0.5 rounded-full inline-block">【第2希望】任意</span>
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">第2希望日程</label>
+            <select id="preferred-datetime-2" class="w-full px-4 py-2 rounded-lg border border-slate-300 text-sm outline-none bg-white"></select>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">第2希望エリア</label>
+            <select id="preferred-area-2" class="w-full px-4 py-2 rounded-lg border border-slate-300 text-sm outline-none bg-white">
+              <option value="" selected>指定なし</option>
+              <option value="shinjuku">新宿</option>
+              <option value="shibuya">渋谷</option>
+              <option value="ebisu">恵比寿・中目黒</option>
+              <option value="ginza">銀座・有楽町</option>
+              <option value="ikebukuro">池袋</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="pt-4 border-t border-slate-100 flex gap-3 justify-end">
+          <button type="button" id="btn-cancel-modal" class="px-5 py-2.5 bg-slate-100 text-slate-600 font-semibold rounded-lg text-sm">キャンセル</button>
+          <button type="submit" id="btn-pre-submit" class="px-6 py-2.5 bg-emerald-600 text-white font-bold rounded-lg text-sm shadow">確認へ進む <i class="fa-solid fa-arrow-right ml-1"></i></button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 注意喚起モーダル -->
+  <div id="notice-modal" class="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[60] flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-sm w-full p-6 text-center border border-slate-100">
+      <div class="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-3 text-xl">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+      </div>
+      <h3 class="text-base font-bold text-slate-800 mb-3">ご参加に関する確認事項</h3>
+      <div class="text-xs text-slate-600 text-left space-y-2 mb-6 bg-red-50/70 p-3.5 rounded-xl border border-red-100 leading-relaxed">
+        <p>・20歳未満の方の飲酒は法律で禁止されています。</p>
+        <p>・お車・バイク・自転車でお越しの方の飲酒は固くお断りいたします。</p>
+        <p>・他のお客様へのご迷惑行為や強引な飲酒勧誘はお控えください。</p>
+      </div>
+      <div class="flex gap-2">
+        <button id="btn-notice-cancel" class="w-1/2 py-2.5 bg-slate-100 text-slate-600 font-bold rounded-lg text-xs">戻る</button>
+        <button id="btn-notice-agree" class="w-1/2 py-2.5 bg-red-600 text-white font-bold rounded-lg text-xs shadow">同意して確定</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-400">
+    &copy; 類人猿タイプ診断 App
+  </footer>
+
+  <!-- JSロジック -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      const API_URL = 'https://ape-matching-api.onrender.com/api/ape-profiles';
+      const BOOKING_API_URL = 'https://ape-matching-api.onrender.com/api/bookings';
+
+      let userId = localStorage.getItem('ape_user_id');
+      if (!userId) {
+        userId = 'usr_' + Math.random().toString(36).substring(2, 9);
+        localStorage.setItem('ape_user_id', userId);
+      }
+
+      let latestResult = null;
+
+      function generateAutoDates() {
+        const options = [];
+        const today = new Date();
+        const baseFriday = new Date(2026, 7, 7);
+
+        for (let i = 0; i < 21; i++) {
+          const d = new Date();
+          d.setDate(today.getDate() + i);
+          const dayOfWeek = d.getDay();
+
+          if (dayOfWeek === 3) {
+            options.push(formatEventOption(d, "水曜夜枠 (19:30〜)"));
+          }
+          if (dayOfWeek === 5) {
+            const diffTime = d.getTime() - baseFriday.getTime();
+            const diffDays = Math.round(diffTime / (1000 * 3600 * 24));
+            if (diffDays % 14 === 0) {
+              options.push(formatEventOption(d, "金曜夜枠 (19:30〜)"));
             }
+          }
+        }
+        return options;
+      }
+
+      function formatEventOption(dateObj, suffix) {
+        const year = dateObj.getFullYear();
+        const month = dateObj.getMonth() + 1;
+        const date = dateObj.getDate();
+        const dayName = ['日', '月', '火', '水', '木', '金', '土'][dateObj.getDay()];
+        const ISO_Like = `${year}-${String(month).padStart(2, '0')}-${String(date).padStart(2, '0')}T19:30`;
+        const label = `${month}月${date}日(${dayName}) ${suffix}`;
+        return { value: ISO_Like, label: label };
+      }
+
+      function populateDateSelects() {
+        const dt1 = document.getElementById('preferred-datetime');
+        const dt2 = document.getElementById('preferred-datetime-2');
+        const dates = generateAutoDates();
+
+        if (dt1) {
+          dt1.innerHTML = '<option value="" disabled selected>参加希望の日程を選択してください</option>';
+          dates.forEach(d => dt1.innerHTML += `<option value="${d.value}">${d.label}</option>`);
+        }
+        if (dt2) {
+          dt2.innerHTML = '<option value="" selected>指定なし</option>';
+          dates.forEach(d => dt2.innerHTML += `<option value="${d.value}">${d.label}</option>`);
+        }
+      }
+
+      populateDateSelects();
+
+      const questions = [
+        { id: 1, category: '感情表現', axis: 'EI', text: '自分の感情や考えていることが、周りの人に伝わりやすいと思う。', optionE: 'とてもそう思う', optionI: 'そう思わない' },
+        { id: 2, category: '感情表現', axis: 'EI', text: '会話の最中、ジェスチャーや表情が豊かになることが多い。', optionE: 'あてはまる', optionI: 'あてはまらない' },
+        { id: 3, category: '感情表現', axis: 'EI', text: '何か問題が起きたとき、すぐに意見や感情を口に出す方だ。', optionE: 'あてはまる', optionI: 'あてはまらない' },
+        { id: 4, category: '感情表現', axis: 'EI', text: '嬉しいことや嫌なことがあった時、顔に出やすいと言われる。', optionE: 'そう思う', optionI: 'そう思わない' },
+        { id: 5, category: '感情表現', axis: 'EI', text: '大勢の人の前で自分の意見を発表することにあまり抵抗がない。', optionE: 'あてはまる', optionI: 'あてはまらない' },
+        { id: 6, category: '感情表現', axis: 'EI', text: '自分の気持ちを心の中に留めておき、静かに思考を整理することが多い。', optionE: 'そう思わない', optionI: 'とてもそう思う' },
+        { id: 7, category: '欲求指向', axis: 'AG', text: '仕事や勝負事において、結果や勝ち負けを重視する。', optionA: 'とてもあてはまる', optionG: 'あてはまらない' },
+        { id: 8, category: '欲求指向', axis: 'AG', text: '明確な目標を設定し、それを達成することに最大のやりがいを感じる。', optionA: 'あてはまる', optionG: 'あてはまらない' },
+        { id: 9, category: '欲求指向', axis: 'AG', text: '目標達成のためなら、多少のリスクや変化をとることを恐れない。', optionA: 'そう思う', optionG: 'そう思わない' },
+        { id: 10, category: '欲求指向', axis: 'AG', text: '勝負で一番になることよりも、みんなで協力して平和に進めることが大切だ。', optionA: 'そう思わない', optionG: 'とてもそう思う' },
+        { id: 11, category: '欲求指向', axis: 'AG', text: '人間関係の調和や、お互いの共感・感情を大切にしたい。', optionA: 'あてはまらない', optionG: 'あてはまる' },
+        { id: 12, category: '欲求指向', axis: 'AG', text: '急な変化よりも、決められたルールや手順通りに安心して進めたい。', optionA: 'そう思わない', optionG: 'そう思う' }
+      ];
+
+      const typeMaster = {
+        CHIMPANZEE: { name: 'チンパンジー型', catchphrase: '勝ち気に挑む情熱のチャレンジャー', description: '感情表現が豊かで、成果や勝ち負けにこだわるエネルギッシュなタイプ。高い目標に向かってチームを牽引する力がありますが、時に積極的すぎる面も。', headerBg: 'bg-red-600', badgeBg: 'bg-red-500', matchPhrase: 'エネルギッシュで切磋琢磨できる相性の良いタイプ', hashtags: '類人猿診断,類人猿タイプ診断,チンパンジー型,自己分析' },
+        BONOBO: { name: 'ボノボ型', catchphrase: '共感と調和を愛するムードメーカー', description: '感情表現が豊かで、みんなとの共感や人間関係の調和を最も重視するタイプ。雰囲気を明るくし、チームの連帯感を高めるのが得意です。', headerBg: 'bg-pink-600', badgeBg: 'bg-pink-500', matchPhrase: '明るく共感し合える相性の良いタイプ', hashtags: '類人猿診断,類人猿タイプ診断,ボノボ型,自己分析' },
+        GORILLA: { name: 'ゴリラ型', catchphrase: '安心と平和を守る頼れる守護者', description: '感情を表に強く出さず、秩序や平和、確実なプロセスを重視するタイプ。安定感があり、周囲に安心感を与える信頼できる存在です。', headerBg: 'bg-amber-600', badgeBg: 'bg-amber-500', matchPhrase: '穏やかで安定感のある相性の良いタイプ', hashtags: '類人猿診断,類人猿タイプ診断,ゴリラ型,自己分析' },
+        ORANGUTAN: { name: 'オランウータン型', catchphrase: '独自の世界で真理を探求するスペシャリスト', description: '感情をあまり表に出さず、自分のペースや納得感を大切にしながら成果や課題解決に向き合うタイプ。論理的で職人的な深い思考力を持ちます。', headerBg: 'bg-blue-600', badgeBg: 'bg-blue-500', matchPhrase: 'マイペースに深く語り合える相性の良いタイプ', hashtags: '類人猿診断,類人猿タイプ診断,オランウータン型,自己分析' }
+      };
+
+      let currentIndex = 0;
+      const userAnswers = new Array(questions.length).fill(null);
+
+      const startScreen = document.getElementById('start-screen');
+      const quizScreen = document.getElementById('quiz-screen');
+      const resultScreen = document.getElementById('result-screen');
+      const bookingModal = document.getElementById('booking-modal');
+      const noticeModal = document.getElementById('notice-modal');
+
+      const btnStart = document.getElementById('btn-start');
+      const btnPrev = document.getElementById('btn-prev');
+      const btnNext = document.getElementById('btn-next');
+      const btnRestart = document.getElementById('btn-restart');
+      const btnOpenBooking = document.getElementById('btn-open-booking');
+      const btnCloseModal = document.getElementById('btn-close-modal');
+      const btnCancelModal = document.getElementById('btn-cancel-modal');
+      const bookingForm = document.getElementById('booking-form');
+      const existingCard = document.getElementById('existing-booking-card');
+      const btnClearBooking = document.getElementById('btn-clear-booking');
+      const btnDownloadImg = document.getElementById('btn-download-img');
+
+      const btnNoticeCancel = document.getElementById('btn-notice-cancel');
+      const btnNoticeAgree = document.getElementById('btn-notice-agree');
+
+      const progressBar = document.getElementById('progress-bar');
+      const progressText = document.getElementById('progress-text');
+      const questionCategory = document.getElementById('question-category');
+      const questionText = document.getElementById('question-text');
+      const optionsContainer = document.getElementById('options-container');
+
+      btnStart.addEventListener('click', startQuiz);
+      btnPrev.addEventListener('click', goToPrevQuestion);
+      btnNext.addEventListener('click', goToNextQuestion);
+      btnRestart.addEventListener('click', restartQuiz);
+
+      // 画像保存ロジック (html2canvas)
+      btnDownloadImg.addEventListener('click', async () => {
+        const cardElement = document.getElementById('result-card');
+        btnDownloadImg.disabled = true;
+        btnDownloadImg.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 画像生成中...';
+
+        try {
+          const canvas = await html2canvas(cardElement, {
+            scale: 2, // 高解像度出力
+            useCORS: true,
+            backgroundColor: '#ffffff'
+          });
+
+          const image = canvas.toDataURL('image/png');
+          const link = document.createElement('a');
+          link.href = image;
+          link.download = `類人猿診断結果_${latestResult ? latestResult.primaryType : 'result'}.png`;
+          link.click();
+        } catch (err) {
+          console.error('画像生成に失敗しました:', err);
+          alert('画像の保存に失敗しました。');
+        } finally {
+          btnDownloadImg.disabled = false;
+          btnDownloadImg.innerHTML = '<i class="fa-solid fa-download"></i> 結果を画像保存';
+        }
+      });
+
+      btnOpenBooking.addEventListener('click', () => {
+        const savedBooking = JSON.parse(localStorage.getItem('active_ape_booking'));
+        if (savedBooking) {
+          document.getElementById('disp-booking-id').textContent = savedBooking.booking_id;
+          document.getElementById('disp-target-1').textContent = `${savedBooking.area} / ${savedBooking.datetime.replace('T', ' ')}`;
+          document.getElementById('disp-target-2').textContent = savedBooking.area_2 ? `${savedBooking.area_2} / ${savedBooking.datetime_2.replace('T', ' ')}` : 'なし';
+          bookingForm.classList.add('hidden');
+          existingCard.classList.remove('hidden');
+        } else {
+          bookingForm.classList.remove('hidden');
+          existingCard.classList.add('hidden');
+        }
+        bookingModal.classList.remove('hidden');
+      });
+
+      btnCloseModal.addEventListener('click', () => bookingModal.classList.add('hidden'));
+      btnCancelModal.addEventListener('click', () => bookingModal.classList.add('hidden'));
+
+      btnClearBooking.addEventListener('click', () => {
+        if (confirm('ローカルの予約表示をクリアしますか？')) {
+          localStorage.removeItem('active_ape_booking');
+          existingCard.classList.add('hidden');
+          bookingForm.classList.remove('hidden');
+        }
+      });
+
+      bookingForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const age = parseInt(document.getElementById('user-age').value, 10);
+        if (age < 18) {
+          alert('18歳未満の方はご参加いただけません。');
+          return;
+        }
+        noticeModal.classList.remove('hidden');
+      });
+
+      btnNoticeCancel.addEventListener('click', () => noticeModal.classList.add('hidden'));
+
+      btnNoticeAgree.addEventListener('click', async () => {
+        noticeModal.classList.add('hidden');
+        const preSubmitBtn = document.getElementById('btn-pre-submit');
+        preSubmitBtn.disabled = true;
+        preSubmitBtn.textContent = '送信中...';
+
+        const bookingData = {
+          user_id: userId,
+          name: document.getElementById('user-name').value,
+          gender: document.getElementById('user-gender').value,
+          age: parseInt(document.getElementById('user-age').value, 10),
+          area: document.getElementById('preferred-area').value,
+          datetime: document.getElementById('preferred-datetime').value,
+          area_2: document.getElementById('preferred-area-2').value || null,
+          datetime_2: document.getElementById('preferred-datetime-2').value || null,
+          primary_type: latestResult ? latestResult.primaryType.toLowerCase() : 'gorilla'
+        };
+
+        try {
+          const response = await fetch(BOOKING_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(bookingData)
+          });
+          if (!response.ok) throw new Error(`送信失敗: ${response.status}`);
+          const resData = await response.json();
+
+          localStorage.setItem('active_ape_booking', JSON.stringify({
+            booking_id: resData.booking_id,
+            area: bookingData.area,
+            datetime: bookingData.datetime,
+            area_2: bookingData.area_2,
+            datetime_2: bookingData.datetime_2
+          }));
+
+          alert(`【仮予約完了】\n${bookingData.name} 様、食事会マッチングへのご応募を受け付けました！\n（予約ID: ${resData.booking_id}）`);
+          bookingModal.classList.add('hidden');
+          bookingForm.reset();
+        } catch (error) {
+          console.error('予約エラー:', error);
+          alert('予約の送信に失敗しました。');
+        } finally {
+          preSubmitBtn.disabled = false;
+          preSubmitBtn.innerHTML = '確認へ進む <i class="fa-solid fa-arrow-right ml-1"></i>';
+        }
+      });
+
+      function startQuiz() {
+        startScreen.classList.add('hidden');
+        quizScreen.classList.remove('hidden');
+        resultScreen.classList.add('hidden');
+        currentIndex = 0;
+        userAnswers.fill(null);
+        renderQuestion();
+      }
+
+      function restartQuiz() {
+        resultScreen.classList.add('hidden');
+        startScreen.classList.remove('hidden');
+      }
+
+      function renderQuestion() {
+        const q = questions[currentIndex];
+        progressBar.style.width = `${((currentIndex + 1) / questions.length) * 100}%`;
+        progressText.textContent = `${currentIndex + 1} / ${questions.length}`;
+
+        questionCategory.textContent = q.category;
+        questionText.textContent = `Q${currentIndex + 1}. ${q.text}`;
+        optionsContainer.innerHTML = '';
+
+        const isAxisEI = q.axis === 'EI';
+        const options = [
+          { label: isAxisEI ? q.optionE : q.optionA, value: isAxisEI ? 'E' : 'A' },
+          { label: isAxisEI ? q.optionI : q.optionG, value: isAxisEI ? 'I' : 'G' }
         ];
 
-        const typeResults = {
-            chimpanzee: {
-                title: "チンパンジータイプ",
-                subtitle: "勝利と成果を追い求める「情熱的なリーダー」",
-                desc: "目標達成に向かって高いエネルギーを発揮し、決断力と行動力に優れています。勝ち負けや成果が明確な環境で真価を発揮し、周囲を引っ張る力を持っています。",
-                jobs: "新規事業開発、営業・企画、経営者・起業家、マネージャー職",
-                tips: "成果を焦るあまりプロセスの丁寧さや共感をおろそかにしがちです。周囲の感情や安定を求めるメンバーの意向にも耳を傾けるとさらに強い信頼を得られます。"
-            },
-            bonobo: {
-                title: "ボノボタイプ",
-                subtitle: "共感と調和を大切にする「感情豊かなムードメーカー」",
-                desc: "高い共感力とコミュ力でチームの雰囲気を良くする天才です。人と人とのつながりや場の一体感を重視し、人間関係の摩擦を和らげる役割を果たします。",
-                jobs: "カウンセラー・人事・採用、広報・カスタマーサクセス、接客・サービス業",
-                tips: "周囲に合わせすぎて自身の意見を引っ込めてしまうことがあります。成果や効率もバランスよく意識することで、組織内での評価がより高まります。"
-            },
-            gorilla: {
-                title: "ゴリラタイプ",
-                subtitle: "規律と調和を守る「誠実な平和主義者」",
-                desc: "秩序やルーティンを大切にし、計画通りに実直に作業を進める職人肌です。自己主張は控えめですが、グループの安全と安定を支える強い責任感を持っています。",
-                jobs: "事務・経理・総務、運用保守・管理業務、品質管理・カスタマーサポート",
-                tips: "急な変更や不確実な状況で不安を感じやすい傾向があります。時には柔軟な変化を受け入れる姿勢を持つと、新しいチャンスを掴みやすくなります。"
-            },
-            orangutan: {
-                title: "オランウータンタイプ",
-                subtitle: "論理とマイペースを極める「冷静なスペシャリスト」",
-                desc: "客観的で論理的な思考を持ち、専門的な技術や知識を深く追求することを好みます。感情に左右されず、独自の視点から物事のの本質を見抜く力があります。",
-                jobs: "エンジニア・研究職、データアナリスト、専門コンサルタント、職人",
-                tips: "単独行動を好み、無用な干渉を避けるあまり冷たく見られることがあります。必要な情報共有やチームへの配慮を少し意識するだけで協働が円滑になります。"
-            }
-        };
-
-        // State variables
-        let currentQuestion = 0;
-        let scores = {
-            chimpanzee: 0,
-            bonobo: 0,
-            gorilla: 0,
-            orangutan: 0
-        };
-
-        // DOM elements
-        const introScreen = document.getElementById("intro-screen");
-        const quizScreen = document.getElementById("quiz-screen");
-        const resultScreen = document.getElementById("result-screen");
-        const startBtn = document.getElementById("start-btn");
-        const resetBtn = document.getElementById("reset-btn");
-        const questionText = document.getElementById("question-text");
-        const optionsContainer = document.getElementById("options-container");
-        const progressBar = document.getElementById("progress-bar");
-        const progressText = document.getElementById("progress-text");
-        const progressPercent = document.getElementById("progress-percent");
-
-        // Reservation Modal Logic Elements
-        const modal = document.getElementById("reservation-modal");
-        const modalOpenBtn = document.getElementById("reservation-modal-open");
-        const modalCloseBtn = document.getElementById("modal-close");
-        const dateSelect = document.getElementById("date-select");
-        const reservationForm = document.getElementById("reservation-form");
-
-        // Event Listeners
-        startBtn.addEventListener("click", startQuiz);
-        resetBtn.addEventListener("click", resetQuiz);
-
-        function startQuiz() {
-            introScreen.classList.add("hidden");
-            resultScreen.classList.add("hidden");
-            quizScreen.classList.remove("hidden");
-            resetBtn.classList.remove("hidden");
-            currentQuestion = 0;
-            scores = { chimpanzee: 0, bonobo: 0, gorilla: 0, orangutan: 0 };
+        options.forEach((opt) => {
+          const isSelected = userAnswers[currentIndex] === opt.value;
+          const optionEl = document.createElement('label');
+          optionEl.className = `flex items-center justify-between p-4 rounded-xl border-2 cursor-pointer transition-all duration-200 ${
+            isSelected 
+              ? 'border-emerald-500 bg-emerald-50/50 text-emerald-900 font-semibold shadow-sm' 
+              : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 text-slate-700'
+          }`;
+          optionEl.innerHTML = `
+            <span class="text-sm md:text-base">${opt.label}</span>
+            <input type="radio" name="option" value="${opt.value}" ${isSelected ? 'checked' : ''} class="w-4 h-4 text-emerald-600 focus:ring-emerald-500">
+          `;
+          optionEl.addEventListener('click', () => {
+            userAnswers[currentIndex] = opt.value;
             renderQuestion();
-        }
-
-        function resetQuiz() {
-            if (confirm("診断を最初からやり直しますか？")) {
-                quizScreen.classList.add("hidden");
-                resultScreen.classList.add("hidden");
-                introScreen.classList.remove("hidden");
-                resetBtn.classList.add("hidden");
-            }
-        }
-
-        function renderQuestion() {
-            const q = questions[currentQuestion];
-            questionText.innerText = `Q${currentQuestion + 1}. ${q.text}`;
-            
-            // Update progress
-            const percent = Math.round(((currentQuestion) / questions.length) * 100);
-            progressBar.style.width = `${percent}%`;
-            progressText.innerText = `質問 ${currentQuestion + 1} / ${questions.length}`;
-            progressPercent.innerText = `${percent}%`;
-
-            optionsContainer.innerHTML = "";
-            
-            // Shuffle or render options
-            q.options.forEach((opt, index) => {
-                const btn = document.createElement("button");
-                btn.className = "w-full text-left p-4 rounded-lg border border-slate-200 hover:border-amber-700 hover:bg-amber-50/50 transition flex items-center justify-between group";
-                btn.innerHTML = `
-                    <span class="text-slate-700 font-medium group-hover:text-amber-900">${opt.text}</span>
-                    <i class="fa-solid fa-chevron-right text-slate-300 group-hover:text-amber-800 text-sm"></i>
-                `;
-                btn.addEventListener("click", () => handleAnswer(opt.type));
-                optionsContainer.appendChild(btn);
-            });
-        }
-
-        function handleAnswer(type) {
-            scores[type]++;
-            currentQuestion++;
-
-            if (currentQuestion < questions.length) {
-                renderQuestion();
-            } else {
-                showResults();
-            }
-        }
-
-        function showResults() {
-            quizScreen.classList.add("hidden");
-            resultScreen.classList.remove("hidden");
-
-            // Find top type
-            let topType = "chimpanzee";
-            let maxScore = -1;
-            for (const type in scores) {
-                if (scores[type] > maxScore) {
-                    maxScore = scores[type];
-                    topType = type;
-                }
-            }
-
-            const res = typeResults[topType];
-            document.getElementById("result-title").innerText = res.title;
-            document.getElementById("result-subtitle").innerText = res.subtitle;
-            document.getElementById("result-desc").innerText = res.desc;
-            document.getElementById("result-jobs").innerText = res.jobs;
-            document.getElementById("result-tips").innerText = res.tips;
-
-            // Calculate ratios for Axes
-            // Axis 1: Logic/Goal (Chimpanzee + Orangutan) vs Emotion/Relation (Bonobo + Gorilla)
-            const logicScore = scores.chimpanzee + scores.orangutan;
-            const axis1Ratio = Math.round((logicScore / questions.length) * 100);
-            document.getElementById("axis1-bar").style.width = `${axis1Ratio}%`;
-
-            // Axis 2: Outgoing (Chimpanzee + Bonobo) vs Introverted (Gorilla + Orangutan)
-            const introScore = scores.gorilla + scores.orangutan;
-            const axis2Ratio = Math.round((introScore / questions.length) * 100);
-            document.getElementById("axis2-bar").style.width = `${axis2Ratio}%`;
-
-            // X Share Setup
-            const shareXBtn = document.getElementById("share-x-btn");
-            shareXBtn.onclick = () => {
-                const text = encodeURIComponent(`【類人猿タイプ診断】私の結果は...「${res.title}」でした！\n${res.subtitle}\n`);
-                const url = encodeURIComponent(window.location.href);
-                window.open(`https://twitter.com/intent/tweet?text=${text}&url=${url}`, '_blank');
-            };
-
-            // Populate Modal Dates
-            generateModalDates();
-        }
-
-        // Modal Controls
-        modalOpenBtn.addEventListener("click", () => {
-            modal.classList.remove("hidden");
-            modal.classList.add("flex");
+          });
+          optionsContainer.appendChild(optionEl);
         });
 
-        modalCloseBtn.addEventListener("click", () => {
-            modal.classList.add("hidden");
-            modal.classList.remove("flex");
-        });
+        btnPrev.disabled = currentIndex === 0;
+        btnNext.disabled = userAnswers[currentIndex] === null;
+        btnNext.innerHTML = currentIndex === questions.length - 1 
+          ? '結果を見る <i class="fa-solid fa-square-poll-vertical ml-1"></i>' 
+          : '次へ <i class="fa-solid fa-chevron-right ml-1"></i>';
+      }
 
-        reservationForm.addEventListener("submit", (e) => {
-            e.preventDefault();
-            alert("フィードバックのご予約ありがとうございます。確認メールをお送りいたしました。");
-            modal.classList.add("hidden");
-            modal.classList.remove("flex");
-        });
-
-        function generateModalDates() {
-            dateSelect.innerHTML = "";
-            const today = new Date();
-            let addedCount = 0;
-
-            for (let i = 1; i <= 30; i++) {
-                const target = new Date();
-                target.setDate(today.getDate() + i);
-                const day = target.getDay();
-
-                // Generate Wednesdays (3) or alternate Fridays (5)
-                if (day === 3 || day === 5) {
-                    const yyyy = target.getFullYear();
-                    const mm = String(target.getMonth() + 1).padStart(2, '0');
-                    const dd = String(target.getDate()).padStart(2, '0');
-                    const dayStr = ["日", "月", "火", "水", "木", "金", "土"][day];
-
-                    const opt = document.createElement("option");
-                    opt.value = `${yyyy}-${mm}-${dd}`;
-                    opt.innerText = `${yyyy}年${mm}月${dd}日 (${dayStr}) 20:00~`;
-                    dateSelect.appendChild(opt);
-                    addedCount++;
-                    if (addedCount >= 5) break;
-                }
-            }
+      function goToPrevQuestion() {
+        if (currentIndex > 0) {
+          currentIndex--;
+          renderQuestion();
         }
-    </script>
+      }
+
+      function goToNextQuestion() {
+        if (userAnswers[currentIndex] === null) return;
+        if (currentIndex < questions.length - 1) {
+          currentIndex++;
+          renderQuestion();
+        } else {
+          showResults();
+        }
+      }
+
+      function calculateScores() {
+        let scoreE = 0, scoreI = 0, scoreA = 0, scoreG = 0;
+        userAnswers.forEach(ans => {
+          if (ans === 'E') scoreE++;
+          if (ans === 'I') scoreI++;
+          if (ans === 'A') scoreA++;
+          if (ans === 'G') scoreG++;
+        });
+
+        const chimpanzeeScore = scoreE + scoreA;
+        const bonoboScore = scoreE + scoreG;
+        const gorillaScore = scoreI + scoreG;
+        const orangutanScore = scoreI + scoreA;
+        const totalPoints = chimpanzeeScore + bonoboScore + gorillaScore + orangutanScore;
+
+        const profiles = {
+          CHIMPANZEE: Math.round((chimpanzeeScore / totalPoints) * 100),
+          BONOBO: Math.round((bonoboScore / totalPoints) * 100),
+          GORILLA: Math.round((gorillaScore / totalPoints) * 100),
+          ORANGUTAN: Math.round((orangutanScore / totalPoints) * 100)
+        };
+
+        const isE = scoreE >= scoreI;
+        const isA = scoreA >= scoreG;
+        let primaryType = isE ? (isA ? 'CHIMPANZEE' : 'BONOBO') : (isA ? 'ORANGUTAN' : 'GORILLA');
+
+        return { primaryType, scoreE, scoreI, scoreA, scoreG, profiles };
+      }
+
+      async function showResults() {
+        quizScreen.classList.add('hidden');
+        resultScreen.classList.remove('hidden');
+
+        latestResult = calculateScores();
+        const mainTypeInfo = typeMaster[latestResult.primaryType];
+
+        document.getElementById('result-header').className = `p-8 text-center text-white ${mainTypeInfo.headerBg}`;
+        document.getElementById('result-type-name').textContent = mainTypeInfo.name;
+        document.getElementById('result-catchphrase').textContent = mainTypeInfo.catchphrase;
+        document.getElementById('result-description').textContent = mainTypeInfo.description;
+
+        const axisEIText = latestResult.scoreE >= latestResult.scoreI ? `感情表現型 (E: ${latestResult.scoreE}pt)` : `感情抑制型 (I: ${latestResult.scoreI}pt)`;
+        const axisAGText = latestResult.scoreA >= latestResult.scoreG ? `成果指向型 (A: ${latestResult.scoreA}pt)` : `安寧・調和型 (G: ${latestResult.scoreG}pt)`;
+
+        document.getElementById('axis-e-i').textContent = axisEIText;
+        document.getElementById('axis-a-g').textContent = axisAGText;
+
+        const scoreBreakdown = document.getElementById('score-breakdown');
+        scoreBreakdown.innerHTML = '';
+        ['CHIMPANZEE', 'BONOBO', 'GORILLA', 'ORANGUTAN'].forEach(key => {
+          const info = typeMaster[key];
+          const pct = latestResult.profiles[key];
+          const row = document.createElement('div');
+          row.className = 'space-y-1';
+          row.innerHTML = `
+            <div class="flex justify-between text-xs font-semibold text-slate-600">
+              <span class="${key === latestResult.primaryType ? 'font-bold text-slate-800' : ''}">${info.name}</span>
+              <span>${pct}%</span>
+            </div>
+            <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+              <div class="${info.badgeBg} h-2 rounded-full transition-all duration-500" style="width: ${pct}%"></div>
+            </div>
+          `;
+          scoreBreakdown.appendChild(row);
+        });
+
+        // X（Twitter）シェアリンクの生成
+        const shareBtn = document.getElementById('btn-share-x');
+        const shareText = `【類人猿タイプ診断結果】\n` +
+          `私のタイプは「${mainTypeInfo.name}」でした！\n` +
+          `〜${mainTypeInfo.catchphrase}〜\n\n` +
+          `📊 診断軸の分析：\n` +
+          `・感情表現：${axisEIText}\n` +
+          `・欲求指向：${axisAGText}\n\n` +
+          `${mainTypeInfo.matchPhrase}と一緒に参加できる食事会も開催中🍴✨\n` +
+          `あなたは何タイプ？診断してみてね！\n`;
+
+        shareBtn.setAttribute('href', `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(window.location.href)}&hashtags=${encodeURIComponent(mainTypeInfo.hashtags)}`);
+
+        try {
+          await fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              user_id: userId,
+              primary_type: latestResult.primaryType.toLowerCase(),
+              score_e: latestResult.scoreE,
+              score_i: latestResult.scoreI,
+              score_a: latestResult.scoreA,
+              score_g: latestResult.scoreG
+            })
+          });
+        } catch (err) {
+          console.warn('プロファイル保存スキップ:', err);
+        }
+      }
+    });
+  </script>
 </body>
 </html>
