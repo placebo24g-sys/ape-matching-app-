@@ -22,6 +22,8 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
+    BigInteger,
+    or_,
     create_engine,
     func,
     select,
@@ -102,6 +104,18 @@ class ApeProfileModel(Base):
     score_orangutan: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     extraversion_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     achievement_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
+
+# --- ブラックリストモデル (新規追加) ---
+class BlacklistModel(Base):
+    __tablename__ = "blacklists"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    email: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    phone_number: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    ip_address: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
+    reason: Mapped[Optional[str]] = mapped_column(String, default="規約違反・自動判定")
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
 # --- 子モデル ---
@@ -274,6 +288,8 @@ class BookingCreate(BaseModel):
     name: str
     gender: str
     age: Optional[int] = None
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
     area: str
     datetime: str
     area_2: Optional[str] = None
@@ -304,18 +320,40 @@ def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-P
 def read_root():
     return {"status": "ok", "service": "APE Matching API"}
 
-# 2. 予約作成 API
+# 2. 予約作成 API (ブラックリスト判定処理を追加)
 @app.post("/api/bookings", status_code=status.HTTP_201_CREATED)
 def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
+    # --- 【追加】ブラックリスト判定 (user_id / email / phone_number) ---
+    conditions = [BlacklistModel.user_id == booking.user_id]
+    if booking.email:
+        conditions.append(BlacklistModel.email == booking.email)
+    if booking.phone_number:
+        conditions.append(BlacklistModel.phone_number == booking.phone_number)
+
+    blacklisted_entry = db.scalar(
+        select(BlacklistModel).where(or_(*conditions))
+    )
+    if blacklisted_entry:
+        raise HTTPException(
+            status_code=403, 
+            detail="現在、このアカウントからのご予約・操作は受け付けることができません。"
+        )
+
+    # ユーザーモデルの確認・作成
     user = db.scalar(select(UserModel).where(UserModel.user_id == booking.user_id))
     if user:
         if user.is_blacklisted:
-            raise HTTPException(status_code=403, detail="規約違反により予約を受け付けられません")
+            raise HTTPException(
+                status_code=403, 
+                detail="現在、このアカウントからのご予約・操作は受け付けることができません。"
+            )
     else:
         new_user = UserModel(
             user_id=booking.user_id,
             name=booking.name,
-            gender=booking.gender
+            gender=booking.gender,
+            email=booking.email,
+            phone_number=booking.phone_number
         )
         db.add(new_user)
         try:
