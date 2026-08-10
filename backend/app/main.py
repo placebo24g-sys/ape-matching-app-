@@ -39,7 +39,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 class Base(DeclarativeBase):
     pass
 
-# --- 親モデル（外部キーで参照されるモデル）を先に定義 ---
+# --- 親モデル（外部キーで参照されるモデル） ---
 
 class UserModel(Base):
     __tablename__ = "users"
@@ -92,7 +92,7 @@ class ApeProfileModel(Base):
     achievement_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
-# --- 子モデル（ForeignKey を持っているモデル）を後に定義 ---
+# --- 子モデル（ForeignKey を持っているモデル） ---
 
 class UserCardFingerprintModel(Base):
     __tablename__ = "user_card_fingerprints"
@@ -286,7 +286,7 @@ def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-P
 # 5. API エンドポイント
 # ==========================================
 
-# 1. ルートヘルスチェック（Render起動確認用）
+# 1. ルートヘルスチェック
 @app.get("/")
 def read_root():
     return {"status": "ok", "service": "APE Matching API"}
@@ -294,13 +294,11 @@ def read_root():
 # 2. 予約作成 API
 @app.post("/api/bookings", status_code=status.HTTP_201_CREATED)
 def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
-    # ユーザーがDBに存在するかチェックし、存在しなければ自動作成（安全対策）
     user = db.scalar(select(UserModel).where(UserModel.user_id == booking.user_id))
     if user:
         if user.is_blacklisted:
             raise HTTPException(status_code=403, detail="規約違反により予約を受け付けられません")
     else:
-        # usersテーブルに未登録の場合は初期登録を行う
         new_user = UserModel(
             user_id=booking.user_id,
             name=booking.name,
@@ -311,6 +309,7 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
             db.commit()
         except Exception as e:
             db.rollback()
+            raise HTTPException(status_code=500, detail=f"ユーザー初期作成に失敗しました: {str(e)}")
 
     booking_id = f"bk_{uuid.uuid4().hex[:8]}"
     
@@ -336,11 +335,11 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
         db.refresh(new_booking)
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"予約データ保存に失敗しました: {str(e)}")
     
     return {"status": "success", "booking_id": booking_id, "message": "予約が保存されました"}
 
-# 3. Stripe カード登録 ＆ 複垢名寄せ・ブラックリストチェック API
+# 3. Stripe カード登録 API
 @app.post("/api/users/register-card")
 def register_card(req: CardRegisterRequest, db: Session = Depends(get_db)):
     user = db.scalar(select(UserModel).where(UserModel.user_id == req.user_id))
@@ -356,7 +355,6 @@ def register_card(req: CardRegisterRequest, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Stripeエラー: {str(e)}")
 
-    # 同一カードが過去にブラックリストユーザーで使われていないかチェック
     existing_cards = db.scalars(
         select(UserCardFingerprintModel).where(UserCardFingerprintModel.card_fingerprint == card_fingerprint)
     ).all()
@@ -368,18 +366,20 @@ def register_card(req: CardRegisterRequest, db: Session = Depends(get_db)):
             db.commit()
             raise HTTPException(status_code=403, detail="過去に規約違反があったカードのため受付できません")
 
-    # 正常登録
-    try:
-        new_card_record = UserCardFingerprintModel(user_id=user.user_id, card_fingerprint=card_fingerprint)
-        db.add(new_card_record)
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"カード情報登録エラー: {str(e)}")
+    # 既に自ユーザーに同じフィンガープリントが登録されていないかチェック
+    already_registered = any(r.user_id == user.user_id for r in existing_cards)
+    if not already_registered:
+        try:
+            new_card_record = UserCardFingerprintModel(user_id=user.user_id, card_fingerprint=card_fingerprint)
+            db.add(new_card_record)
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=f"カード情報登録エラー: {str(e)}")
         
     return {"status": "success", "card_fingerprint": card_fingerprint}
 
-# 4. 予約キャンセル ＆ 女性初回免除処理 API
+# 4. 予約キャンセル API
 @app.post("/api/bookings/{booking_id}/cancel")
 def cancel_booking(booking_id: str, req: CancelBookingRequest, db: Session = Depends(get_db)):
     user = db.scalar(select(UserModel).where(UserModel.user_id == req.user_id))
@@ -388,7 +388,6 @@ def cancel_booking(booking_id: str, req: CancelBookingRequest, db: Session = Dep
     if not booking or booking.user_id != req.user_id:
         raise HTTPException(status_code=404, detail="該当の予約が見つかりません")
 
-    # 女性 ＆ 初回キャンセル免除の適用判断
     if user and user.gender == "female" and not user.has_canceled_first_free:
         user.has_canceled_first_free = True
         booking.status = "cancelled"
@@ -408,7 +407,6 @@ def cancel_booking(booking_id: str, req: CancelBookingRequest, db: Session = Dep
             
         return {"status": "cancelled", "fee": 0, "message": "初回のキャンセル料免除が適用されました"}
 
-    # 通常キャンセル料処理 (例: 3,000円)
     cancellation_fee = 3000
     booking.status = "cancelled"
     
@@ -499,13 +497,14 @@ def run_matching(
 
     created_groups_count = 0
     notified_users_count = 0
+    used_booking_ids = set()
 
     def process_slots(users_list: List[BookingModel], is_second_choice: bool = False):
-        nonlocal created_groups_count, notified_users_count
+        nonlocal created_groups_count, notified_users_count, used_booking_ids
         
         slots = defaultdict(list)
         for u in users_list:
-            if u.status != "pending":
+            if u.booking_id in used_booking_ids or u.status != "pending":
                 continue
             
             target_area = u.area_2 if is_second_choice else u.area
@@ -519,7 +518,7 @@ def run_matching(
             slots[(target_area, dt_hour)].append(u)
 
         for (area, dt_hour), pool in slots.items():
-            active_pool = [u for u in pool if u.status == "pending"]
+            active_pool = [u for u in pool if u.booking_id not in used_booking_ids and u.status == "pending"]
             males = [u for u in active_pool if u.gender == "male"]
             females = [u for u in active_pool if u.gender == "female"]
 
@@ -548,20 +547,23 @@ def run_matching(
                         })
 
             possible_groups.sort(key=lambda x: x["score"], reverse=True)
-            used_b_ids = set()
 
             for g in possible_groups:
-                if any(b_id in used_b_ids or db.get(BookingModel, b_id).status == "matched" for b_id in g["b_ids"]):
+                if any(b_id in used_booking_ids for b_id in g["b_ids"]):
                     continue
 
                 group_id = f"grp_{uuid.uuid4().hex[:8]}"
                 for member in g["members"]:
                     member.status = "matched"
                     member.group_id = group_id
-                    used_b_ids.add(member.booking_id)
+                    used_booking_ids.add(member.booking_id)
 
-                db.commit()
-                created_groups_count += 1
+                try:
+                    db.commit()
+                    created_groups_count += 1
+                except Exception as e:
+                    db.rollback()
+                    continue
 
                 for member in g["members"]:
                     msg = (
