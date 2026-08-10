@@ -127,12 +127,12 @@
 
       <!-- アクションボタン群 -->
       <div class="flex flex-col sm:flex-row flex-wrap gap-3 justify-center items-center">
-        <!-- 画像でシェア・保存ボタン（Web Share API ＋ html2canvas） -->
+        <!-- 画像でシェア・保存ボタン -->
         <button id="btn-download-img" class="w-full sm:w-auto px-5 py-3.5 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-2">
           <i class="fa-solid fa-share-nodes"></i> 画像で共有・保存
         </button>
 
-        <!-- X（旧Twitter）テキスト投稿ボタン（140文字対応済み） -->
+        <!-- X（旧Twitter）テキスト投稿ボタン -->
         <a id="btn-share-x" href="#" target="_blank" rel="noopener noreferrer" class="w-full sm:w-auto px-5 py-3.5 bg-black hover:bg-slate-800 text-white font-bold rounded-xl shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-2">
           <i class="fa-brands fa-x-twitter text-lg"></i> テキストで投稿
         </a>
@@ -404,21 +404,18 @@
         btnDownloadImg.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 生成中...';
 
         try {
-          // html2canvasでカードを画像（Canvas）化
           const canvas = await html2canvas(cardElement, {
             scale: 2,
             useCORS: true,
             backgroundColor: '#ffffff'
           });
 
-          // CanvasをBlob（ファイルデータ）に変換
           canvas.toBlob(async (blob) => {
             if (!blob) throw new Error('Blob生成失敗');
             
             const typeName = latestResult ? typeMaster[latestResult.primaryType].name : '診断結果';
             const file = new File([blob], `類人猿診断_${typeName}.png`, { type: 'image/png' });
 
-            // スマホなど Web Share API が画像共有に対応している場合
             if (navigator.canShare && navigator.canShare({ files: [file] })) {
               try {
                 await navigator.share({
@@ -428,11 +425,10 @@
                 });
                 return;
               } catch (shareErr) {
-                if (shareErr.name === 'AbortError') return; // キャンセル時
+                if (shareErr.name === 'AbortError') return;
               }
             }
 
-            // PCなど Web Share 未対応環境の場合（フォールバック：普通に保存して案内）
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
             link.download = `類人猿診断結果_${latestResult ? latestResult.primaryType : 'result'}.png`;
