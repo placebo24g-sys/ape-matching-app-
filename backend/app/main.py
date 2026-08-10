@@ -1,21 +1,33 @@
-import os
-import uuid
 import itertools
-import stripe
+import os
 from collections import defaultdict
-from typing import List, Optional, Dict, Any
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+import uuid
 
-from fastapi import FastAPI, HTTPException, status, Header, Depends
+from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-
-from sqlalchemy import create_engine, String, Integer, Column, DateTime, Boolean, ForeignKey, func, select
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
-
 from linebot.v3.messaging import (
-    Configuration, ApiClient, MessagingApi, PushMessageRequest, TextMessage
+    ApiClient,
+    Configuration,
+    MessagingApi,
+    PushMessageRequest,
+    TextMessage,
 )
+from pydantic import BaseModel
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    create_engine,
+    func,
+    select,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+import stripe
 
 # ==========================================
 # 0. 外部サービス初期化 (Stripe)
@@ -39,7 +51,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 class Base(DeclarativeBase):
     pass
 
-# --- 親モデル（外部キーで参照されるモデル） ---
+# --- 親モデル ---
 
 class UserModel(Base):
     __tablename__ = "users"
@@ -92,7 +104,7 @@ class ApeProfileModel(Base):
     achievement_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
-# --- 子モデル（ForeignKey を持っているモデル） ---
+# --- 子モデル ---
 
 class UserCardFingerprintModel(Base):
     __tablename__ = "user_card_fingerprints"
@@ -126,7 +138,7 @@ def get_db():
 # ==========================================
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 
-def send_line_notification(to_user_id: str, message_text: str):
+def send_line_notification(to_user_id: str, message_text: str) -> bool:
     if not LINE_CHANNEL_ACCESS_TOKEN:
         print("[LINE Notice] ACCESS_TOKEN 未設定のためスキップ")
         return False
@@ -232,7 +244,8 @@ def has_met_before(db: Session, candidate_users: List[BookingModel]) -> bool:
 
     groups = defaultdict(set)
     for m in past_matches:
-        groups[m.group_id].add(m.user_id)
+        if m.group_id:
+            groups[m.group_id].add(m.user_id)
 
     for g_users in groups.values():
         if len(set(u_ids).intersection(g_users)) >= 2:
@@ -351,7 +364,9 @@ def register_card(req: CardRegisterRequest, db: Session = Depends(get_db)):
 
     try:
         pm = stripe.PaymentMethod.retrieve(req.payment_method_id)
-        card_fingerprint = pm.card.fingerprint
+        card_fingerprint = pm.card.fingerprint if pm.card else None
+        if not card_fingerprint:
+            raise HTTPException(status_code=400, detail="カード情報の取得に失敗しました")
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Stripeエラー: {str(e)}")
 
@@ -366,7 +381,6 @@ def register_card(req: CardRegisterRequest, db: Session = Depends(get_db)):
             db.commit()
             raise HTTPException(status_code=403, detail="過去に規約違反があったカードのため受付できません")
 
-    # 既に自ユーザーに同じフィンガープリントが登録されていないかチェック
     already_registered = any(r.user_id == user.user_id for r in existing_cards)
     if not already_registered:
         try:
@@ -463,16 +477,17 @@ def get_matchings(db: Session = Depends(get_db), _: bool = Depends(verify_admin)
 
     groups_dict = defaultdict(list)
     for b in matched_bookings:
-        groups_dict[b.group_id].append({
-            "booking_id": b.booking_id,
-            "user_id": b.user_id,
-            "name": b.name,
-            "gender": b.gender,
-            "age": b.age,
-            "area": b.area,
-            "datetime": b.preferred_datetime,
-            "primary_type": b.primary_type
-        })
+        if b.group_id:
+            groups_dict[b.group_id].append({
+                "booking_id": b.booking_id,
+                "user_id": b.user_id,
+                "name": b.name,
+                "gender": b.gender,
+                "age": b.age,
+                "area": b.area,
+                "datetime": b.preferred_datetime,
+                "primary_type": b.primary_type
+            })
 
     result = []
     for group_id, members in groups_dict.items():
@@ -591,3 +606,9 @@ def run_matching(
         "notified_users": notified_users_count,
         "message": f"{created_groups_count} 件のグループが作られ、{notified_users_count} 名にLINE通知が送信されました。"
     }
+
+# Local 実行用エントリーポイント
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
