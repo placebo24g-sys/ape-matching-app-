@@ -382,6 +382,7 @@
       const existingCard = document.getElementById('existing-booking-card');
       const btnClearBooking = document.getElementById('btn-clear-booking');
       const btnDownloadImg = document.getElementById('btn-download-img');
+      const btnShareX = document.getElementById('btn-share-x');
 
       const btnNoticeCancel = document.getElementById('btn-notice-cancel');
       const btnNoticeAgree = document.getElementById('btn-notice-agree');
@@ -639,63 +640,66 @@
         latestResult = calculateScores();
         const mainTypeInfo = typeMaster[latestResult.primaryType];
 
+        // 1. ヘッダーと基本解説の描画
         document.getElementById('result-header').className = `p-8 text-center text-white ${mainTypeInfo.headerBg}`;
         document.getElementById('result-type-name').textContent = mainTypeInfo.name;
         document.getElementById('result-catchphrase').textContent = mainTypeInfo.catchphrase;
         document.getElementById('result-description').textContent = mainTypeInfo.description;
 
-        const axisEIText = latestResult.scoreE >= latestResult.scoreI ? `感情表現型 (E:${latestResult.scoreE}pt)` : `感情抑制型 (I:${latestResult.scoreI}pt)`;
-        const axisAGText = latestResult.scoreA >= latestResult.scoreG ? `成果指向型 (A:${latestResult.scoreA}pt)` : `安寧・調和型 (G:${latestResult.scoreG}pt)`;
+        // 2. 軸分析テキストの描画
+        document.getElementById('axis-e-i').textContent = latestResult.scoreE >= latestResult.scoreI 
+          ? `外向的・感情表現が豊か (${latestResult.scoreE}/6)` 
+          : `内向的・静かに深く考える (${latestResult.scoreI}/6)`;
+          
+        document.getElementById('axis-a-g').textContent = latestResult.scoreA >= latestResult.scoreG 
+          ? `成果・達成指向 (${latestResult.scoreA}/6)` 
+          : `調和・プロセス指向 (${latestResult.scoreG}/6)`;
 
-        document.getElementById('axis-e-i').textContent = axisEIText;
-        document.getElementById('axis-a-g').textContent = axisAGText;
-
+        // 3. スコア構成比率バーの描画
         const scoreBreakdown = document.getElementById('score-breakdown');
         scoreBreakdown.innerHTML = '';
-        ['CHIMPANZEE', 'BONOBO', 'GORILLA', 'ORANGUTAN'].forEach(key => {
-          const info = typeMaster[key];
-          const pct = latestResult.profiles[key];
+        
+        Object.keys(latestResult.profiles).forEach(key => {
+          const type = typeMaster[key];
+          const percent = latestResult.profiles[key];
+          
           const row = document.createElement('div');
           row.className = 'space-y-1';
           row.innerHTML = `
             <div class="flex justify-between text-xs font-semibold text-slate-600">
-              <span class="${key === latestResult.primaryType ? 'font-bold text-slate-800' : ''}">${info.name}</span>
-              <span>${pct}%</span>
+              <span>${type.name}</span>
+              <span>${percent}%</span>
             </div>
             <div class="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-              <div class="${info.badgeBg} h-2 rounded-full transition-all duration-500" style="width: ${pct}%"></div>
+              <div class="${type.badgeBg} h-2 rounded-full transition-all duration-500" style="width: ${percent}%"></div>
             </div>
           `;
           scoreBreakdown.appendChild(row);
         });
 
-        // X（Twitter）テキスト投稿リンクの生成（140文字以内に安全に収める調整）
-        const shareBtn = document.getElementById('btn-share-x');
-        const shortHashtags = '類人猿診断,自己分析';
-        const shareText = `【類人猿タイプ診断結果】\n` +
-          `私のタイプは「${mainTypeInfo.name}」でした！\n` +
-          `（${mainTypeInfo.catchphrase}）\n\n` +
-          `・感情表現：${axisEIText}\n` +
-          `・欲求指向：${axisAGText}\n\n` +
-          `あなたは何タイプ？診断してみてね👇\n`;
+        // 4. X（Twitter）シェアボタンURLの設定
+        const shareText = encodeURIComponent(`私の類人猿タイプは【${mainTypeInfo.name}】（${mainTypeInfo.catchphrase}）でした！\n\n#類人猿診断 #類人猿タイプ診断`);
+        const shareUrl = encodeURIComponent(window.location.href);
+        btnShareX.href = `https://twitter.com/intent/tweet?text=${shareText}&url=${shareUrl}`;
 
-        shareBtn.setAttribute('href', `https://twitter.com/intent/tweet?text=${encodeURIComponent(shareText)}&url=${encodeURIComponent(window.location.href)}&hashtags=${encodeURIComponent(shortHashtags)}`);
-
+        // 5. バックエンドAPIへの診断結果自動送信 (非同期)
         try {
-          await fetch(API_URL, {
+          fetch(API_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               user_id: userId,
               primary_type: latestResult.primaryType.toLowerCase(),
-              score_e: latestResult.scoreE,
-              score_i: latestResult.scoreI,
-              score_a: latestResult.scoreA,
-              score_g: latestResult.scoreG
+              scores: {
+                E: latestResult.scoreE,
+                I: latestResult.scoreI,
+                A: latestResult.scoreA,
+                G: latestResult.scoreG
+              }
             })
-          });
-        } catch (err) {
-          console.warn('プロファイル保存スキップ:', err);
+          }).catch(err => console.warn('APIへの結果送信をスキップしました:', err));
+        } catch (e) {
+          // エラーが発生してもUIの表示は継続
         }
       }
     });
