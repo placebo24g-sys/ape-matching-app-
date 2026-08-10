@@ -39,7 +39,8 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 class Base(DeclarativeBase):
     pass
 
-# --- ユーザー情報 ＆ ブラックリスト / キャンセル管理モデル ---
+# --- 親モデル（外部キーで参照されるモデル）を先に定義 ---
+
 class UserModel(Base):
     __tablename__ = "users"
 
@@ -52,39 +53,6 @@ class UserModel(Base):
     is_warning: Mapped[bool] = mapped_column(Boolean, default=False)
     has_canceled_first_free: Mapped[bool] = mapped_column(Boolean, default=False)
     stripe_customer_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
-
-class UserCardFingerprintModel(Base):
-    __tablename__ = "user_card_fingerprints"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.user_id"), index=True)
-    card_fingerprint: Mapped[str] = mapped_column(String, index=True)
-    created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
-
-class CancellationHistoryModel(Base):
-    __tablename__ = "cancellation_histories"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.user_id"))
-    booking_id: Mapped[str] = mapped_column(String, ForeignKey("bookings.booking_id"))
-    fee_amount: Mapped[int] = mapped_column(Integer, default=0)
-    is_exempted: Mapped[bool] = mapped_column(Boolean, default=False)
-    created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
-
-# --- マッチング＆プロファイル用モデル ---
-class ApeProfileModel(Base):
-    __tablename__ = "ape_profiles"
-
-    profile_id: Mapped[str] = mapped_column(String, primary_key=True)
-    user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    primary_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    score_chimpanzee: Mapped[Optional[int]] = mapped_column(Integer, default=0)
-    score_bonobo: Mapped[Optional[int]] = mapped_column(Integer, default=0)
-    score_gorilla: Mapped[Optional[int]] = mapped_column(Integer, default=0)
-    score_orangutan: Mapped[Optional[int]] = mapped_column(Integer, default=0)
-    extraversion_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
-    achievement_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
 class BookingModel(Base):
@@ -108,6 +76,40 @@ class BookingModel(Base):
     
     status: Mapped[str] = mapped_column(String, default="pending")  # 'pending', 'matched', 'cancelled'
     group_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
+
+class ApeProfileModel(Base):
+    __tablename__ = "ape_profiles"
+
+    profile_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    primary_type: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    score_chimpanzee: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    score_bonobo: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    score_gorilla: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    score_orangutan: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    extraversion_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    achievement_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
+
+# --- 子モデル（ForeignKey を持っているモデル）を後に定義 ---
+
+class UserCardFingerprintModel(Base):
+    __tablename__ = "user_card_fingerprints"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.user_id"), index=True)
+    card_fingerprint: Mapped[str] = mapped_column(String, index=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
+
+class CancellationHistoryModel(Base):
+    __tablename__ = "cancellation_histories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.user_id"))
+    booking_id: Mapped[str] = mapped_column(String, ForeignKey("bookings.booking_id"))
+    fee_amount: Mapped[int] = mapped_column(Integer, default=0)
+    is_exempted: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
 Base.metadata.create_all(bind=engine)
