@@ -38,6 +38,34 @@
     </div>
   </div>
 
+  <!-- 手動グループ割り当てモーダル -->
+  <div id="manual-modal" class="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 border border-slate-100 max-h-[90vh] flex flex-col">
+      <div class="flex justify-between items-center pb-4 border-b border-slate-100">
+        <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+          <i class="fa-solid fa-user-gear text-teal-600"></i> 手動グループ割り当て
+        </h3>
+        <button id="btn-close-manual" class="text-slate-400 hover:text-slate-600 text-xl font-bold">&times;</button>
+      </div>
+      
+      <p class="text-xs text-slate-500 my-3">グループにする待機中のユーザーを選択してください（2名以上推奨）</p>
+
+      <!-- 待機中ユーザーリスト -->
+      <div class="overflow-y-auto flex-1 my-2 border border-slate-200 rounded-xl divide-y divide-slate-100" id="manual-user-list">
+        <!-- JavaScriptで生成 -->
+      </div>
+
+      <div class="pt-4 border-t border-slate-100 flex justify-end gap-3">
+        <button id="btn-cancel-manual" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-bold rounded-xl transition">
+          キャンセル
+        </button>
+        <button id="btn-submit-manual" class="px-5 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold rounded-xl transition shadow">
+          選択したユーザーでグループ作成
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- 管理画面メインコンテンツ -->
   <div id="admin-content" class="max-w-6xl mx-auto hidden">
     <!-- ヘッダー -->
@@ -63,6 +91,10 @@
 
         <button id="btn-run-match" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition shadow flex items-center gap-2">
           <i class="fa-solid fa-wand-magic-sparkles"></i> マッチング実行
+        </button>
+        <!-- 手動割当ボタンを追加 -->
+        <button id="btn-manual-match" class="px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold rounded-xl transition shadow flex items-center gap-2">
+          <i class="fa-solid fa-user-plus"></i> 手動割当
         </button>
         <button id="btn-refresh" class="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl transition shadow flex items-center gap-2">
           <i class="fa-solid fa-rotate-right"></i> 更新
@@ -123,6 +155,9 @@
     const loginForm = document.getElementById('login-form');
     const loginError = document.getElementById('login-error');
 
+    // 手動割当用に予約データを保持する変数
+    let currentBookings = [];
+
     // XSS対策エスケープ関数
     function escapeHtml(str) {
       if (str === null || str === undefined) return '';
@@ -169,6 +204,7 @@
 
         loginError.classList.add('hidden');
         const bookings = await response.json();
+        currentBookings = bookings || []; // 手動割当用にデータをキャッシュ
         hideLogin();
 
         if (!bookings || bookings.length === 0) {
@@ -192,7 +228,7 @@
             <td class="p-4">${statusBadge}</td>
             <td class="p-4">
               <div class="font-bold text-slate-800">${escapeHtml(b.name)} <span class="text-xs text-slate-500 font-normal">(${ageText} / ${genderText})</span></div>
-              <div class="text-xs font-mono text-slate-400">ID: ${escapeHtml(b.user_id || b.booking_id)}</div>
+              <div class="text-xs font-mono text-slate-400">ID: ${escapeHtml(b.booking_id || b.user_id)}</div>
             </td>
             <td class="p-4">
               <span class="inline-block bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-xs font-bold mb-1">${escapeHtml(b.area)}</span>
@@ -345,6 +381,100 @@
       } finally {
         btn.disabled = false;
         btn.innerHTML = originalHtml;
+      }
+    });
+
+    // --- 手動グループ割当モーダルの制御 ---
+    const manualModal = document.getElementById('manual-modal');
+    const btnManualMatch = document.getElementById('btn-manual-match');
+    const btnCloseManual = document.getElementById('btn-close-manual');
+    const btnCancelManual = document.getElementById('btn-cancel-manual');
+    const btnSubmitManual = document.getElementById('btn-submit-manual');
+    const manualUserList = document.getElementById('manual-user-list');
+
+    function closeManualModal() {
+      manualModal.classList.add('hidden');
+    }
+
+    btnManualMatch.addEventListener('click', () => {
+      manualUserList.innerHTML = '';
+      
+      // 待機中(matchedでない)ユーザーをフィルター
+      const pendingUsers = currentBookings.filter(b => b.status !== 'matched');
+
+      if (pendingUsers.length === 0) {
+        manualUserList.innerHTML = '<p class="p-6 text-center text-slate-400 text-sm">現在割当可能な待機中のユーザーはいません。</p>';
+      } else {
+        pendingUsers.forEach(u => {
+          const targetId = u.booking_id || u.user_id;
+          const genderText = u.gender === 'male' ? '男' : u.gender === 'female' ? '女' : escapeHtml(u.gender || '-');
+          const item = document.createElement('label');
+          item.className = 'flex items-center justify-between p-3.5 hover:bg-slate-50 cursor-pointer transition select-none';
+          item.innerHTML = `
+            <div class="flex items-center gap-3">
+              <input type="checkbox" value="${escapeHtml(targetId)}" class="manual-user-checkbox w-4 h-4 text-teal-600 rounded border-slate-300 focus:ring-teal-500">
+              <div>
+                <div class="font-bold text-slate-800 text-sm">${escapeHtml(u.name)} <span class="text-xs text-slate-500 font-normal">(${escapeHtml(u.age || '-')}歳 / ${genderText})</span></div>
+                <div class="text-xs text-slate-500">${escapeHtml(u.area)} | ${u.datetime ? escapeHtml(u.datetime.replace('T', ' ')) : '-'}</div>
+              </div>
+            </div>
+            <span class="px-2.5 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full">${escapeHtml(u.primary_type || '-')}</span>
+          `;
+          manualUserList.appendChild(item);
+        });
+      }
+
+      manualModal.classList.remove('hidden');
+    });
+
+    btnCloseManual.addEventListener('click', closeManualModal);
+    btnCancelManual.addEventListener('click', closeManualModal);
+
+    btnSubmitManual.addEventListener('click', async () => {
+      const selectedCheckboxes = document.querySelectorAll('.manual-user-checkbox:checked');
+      const selectedIds = Array.from(selectedCheckboxes).map(cb => cb.value);
+
+      if (selectedIds.length < 2) {
+        alert('グループ作成には最低2名のユーザーを選択してください。');
+        return;
+      }
+
+      if (!confirm(`選択した ${selectedIds.length} 名で新しいグループを作成しますか？`)) return;
+
+      const password = getSavedPassword();
+      const originalText = btnSubmitManual.innerText;
+
+      try {
+        btnSubmitManual.disabled = true;
+        btnSubmitManual.innerText = '作成中...';
+
+        const response = await fetch(`${API_BASE}/matchings/manual`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': password
+          },
+          body: JSON.stringify({ booking_ids: selectedIds })
+        });
+
+        if (response.status === 401) {
+          return handleAuthError();
+        }
+
+        if (response.ok) {
+          alert('手動グループ割り当てが完了しました');
+          closeManualModal();
+          fetchBookings();
+          fetchGroups();
+        } else {
+          const resErr = await response.json().catch(() => ({}));
+          alert(resErr.detail || '割り当て処理に失敗しました (バックエンドAPIの準備をご確認ください)');
+        }
+      } catch (e) {
+        alert('通信エラーが発生しました');
+      } finally {
+        btnSubmitManual.disabled = false;
+        btnSubmitManual.innerText = originalText;
       }
     });
 
