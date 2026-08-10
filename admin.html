@@ -74,7 +74,7 @@
         <h1 class="text-2xl font-bold flex items-center gap-2 text-slate-800">
           <i class="fa-solid fa-gauge-high text-emerald-600"></i> 類人猿マッチング 管理パネル
         </h1>
-        <p class="text-xs text-slate-500 mt-1">食事会マッチングの応募・自動マッチング管理</p>
+        <p class="text-xs text-slate-500 mt-1">食事会マッチングの応募・自動マッチング・ブラックリスト管理</p>
       </div>
       
       <!-- マッチングコントロール部 -->
@@ -92,7 +92,6 @@
         <button id="btn-run-match" class="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-xl transition shadow flex items-center gap-2">
           <i class="fa-solid fa-wand-magic-sparkles"></i> マッチング実行
         </button>
-        <!-- 手動割当ボタンを追加 -->
         <button id="btn-manual-match" class="px-4 py-2.5 bg-teal-600 hover:bg-teal-700 text-white text-sm font-bold rounded-xl transition shadow flex items-center gap-2">
           <i class="fa-solid fa-user-plus"></i> 手動割当
         </button>
@@ -112,6 +111,9 @@
       </button>
       <button id="tab-btn-groups" class="px-5 py-3 font-bold text-sm rounded-t-xl bg-slate-200 text-slate-600 hover:bg-slate-300 transition">
         <i class="fa-solid fa-users mr-1"></i> マッチング成立グループ
+      </button>
+      <button id="tab-btn-blacklist" class="px-5 py-3 font-bold text-sm rounded-t-xl bg-slate-200 text-slate-600 hover:bg-slate-300 transition">
+        <i class="fa-solid fa-user-slash mr-1 text-red-500"></i> ブラックリスト管理
       </button>
     </div>
 
@@ -145,6 +147,56 @@
         <!-- JSでグループカードが挿入されます -->
       </div>
     </div>
+
+    <!-- 3. ブラックリスト管理タブ -->
+    <div id="tab-content-blacklist" class="hidden space-y-6">
+      <!-- 手動追加フォーム -->
+      <div class="bg-white rounded-2xl shadow-sm p-6 border border-slate-200">
+        <h2 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+          <i class="fa-solid fa-user-plus text-emerald-600"></i> ブラックリスト手動追加
+        </h2>
+        <form id="add-blacklist-form" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">ユーザーID (必須)</label>
+            <input type="text" id="bl-user-id" required placeholder="例: usr_abc123" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-slate-600 mb-1">登録理由 (任意)</label>
+            <input type="text" id="bl-reason" placeholder="例: 無断キャンセル複数回" class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-emerald-500">
+          </div>
+          <div class="flex items-end">
+            <button type="submit" id="btn-add-bl" class="w-full py-2 bg-red-600 hover:bg-red-700 text-white font-bold rounded-lg text-sm shadow transition">
+              <i class="fa-solid fa-ban mr-1"></i> ブラックリストに追加
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <!-- ブラックリスト一覧テーブル -->
+      <div class="bg-white rounded-2xl shadow-sm p-6 border border-slate-200">
+        <h2 class="text-base font-bold text-slate-800 mb-4 flex items-center gap-2">
+          <i class="fa-solid fa-user-slash text-red-600"></i> ブラックリスト登録ユーザー一覧
+        </h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-left border-collapse text-sm">
+            <thead>
+              <tr class="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold text-xs uppercase">
+                <th class="p-3">ユーザーID</th>
+                <th class="p-3">登録理由</th>
+                <th class="p-3">登録日時</th>
+                <th class="p-3 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="blacklist-tbody" class="divide-y divide-slate-100">
+              <tr>
+                <td colspan="4" class="p-6 text-center text-slate-400">データを読み込み中...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </div>
 
   <script>
@@ -326,7 +378,111 @@
       }
     }
 
-    // グループ解散リセット機能（API実装時に連携）
+    // ブラックリスト一覧の取得
+    async function fetchBlacklist() {
+      const password = getSavedPassword();
+      if (!password) return showLogin();
+
+      const tbody = document.getElementById('blacklist-tbody');
+      tbody.innerHTML = '<tr><td colspan="4" class="p-6 text-center text-slate-400"><i class="fa-solid fa-spinner fa-spin mr-2"></i>読み込み中...</td></tr>';
+
+      try {
+        const response = await fetch(`${API_BASE}/admin/blacklist`, {
+          headers: { 'X-Admin-Password': password }
+        });
+
+        if (response.status === 401) return handleAuthError();
+        if (!response.ok) throw new Error('取得失敗');
+
+        const data = await response.json();
+
+        if (!data || data.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="4" class="p-6 text-center text-slate-400">現在ブラックリストに登録されているユーザーはいません。</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = '';
+        data.forEach(item => {
+          const tr = document.createElement('tr');
+          tr.className = 'hover:bg-slate-50 transition-colors';
+          const createdAt = item.created_at ? new Date(item.created_at).toLocaleString('ja-JP') : '―';
+
+          tr.innerHTML = `
+            <td class="p-3 font-mono font-bold text-slate-700">${escapeHtml(item.user_id)}</td>
+            <td class="p-3 text-slate-600">${escapeHtml(item.reason || 'なし')}</td>
+            <td class="p-3 text-xs text-slate-400">${createdAt}</td>
+            <td class="p-3 text-right">
+              <button onclick="removeBlacklist('${escapeHtml(item.user_id)}')" class="px-3 py-1 bg-slate-200 hover:bg-emerald-600 hover:text-white text-slate-700 text-xs font-bold rounded-lg transition">
+                解除する
+              </button>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+      } catch (err) {
+        console.error(err);
+        tbody.innerHTML = '<tr><td colspan="4" class="p-6 text-center text-red-500 font-bold">ブラックリストの取得に失敗しました。</td></tr>';
+      }
+    }
+
+    // ブラックリスト追加処理
+    document.getElementById('add-blacklist-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = getSavedPassword();
+      if (!password) return showLogin();
+
+      const userId = document.getElementById('bl-user-id').value.trim();
+      const reason = document.getElementById('bl-reason').value.trim();
+
+      if (!userId) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/admin/blacklist`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': password
+          },
+          body: JSON.stringify({ user_id: userId, reason: reason })
+        });
+
+        if (response.status === 401) return handleAuthError();
+        if (!response.ok) throw new Error('登録失敗');
+
+        alert(`ユーザー [${userId}] をブラックリストに登録しました。`);
+        document.getElementById('add-blacklist-form').reset();
+        fetchBlacklist();
+      } catch (err) {
+        console.error(err);
+        alert('ブラックリスト追加に失敗しました。');
+      }
+    });
+
+    // ブラックリスト解除処理（グローバル関数）
+    window.removeBlacklist = async function(userId) {
+      const password = getSavedPassword();
+      if (!password) return showLogin();
+
+      if (!confirm(`ユーザー [${userId}] のブラックリスト登録を解除しますか？`)) return;
+
+      try {
+        const response = await fetch(`${API_BASE}/admin/blacklist/${encodeURIComponent(userId)}`, {
+          method: 'DELETE',
+          headers: { 'X-Admin-Password': password }
+        });
+
+        if (response.status === 401) return handleAuthError();
+        if (!response.ok) throw new Error('解除失敗');
+
+        alert(`ユーザー [${userId}] のブラックリストを解除しました。`);
+        fetchBlacklist();
+      } catch (err) {
+        console.error(err);
+        alert('ブラックリスト解除に失敗しました。');
+      }
+    };
+
+    // グループ解散リセット機能
     async function cancelGroup(groupId) {
       if (!confirm(`グループ [ ${groupId} ] を解散し、メンバーのステータスを待機中に戻しますか？`)) return;
       const password = getSavedPassword();
@@ -399,7 +555,6 @@
     btnManualMatch.addEventListener('click', () => {
       manualUserList.innerHTML = '';
       
-      // 待機中(matchedでない)ユーザーをフィルター
       const pendingUsers = currentBookings.filter(b => b.status !== 'matched');
 
       if (pendingUsers.length === 0) {
@@ -481,23 +636,44 @@
     // タブ切り替え制御
     const tabBookings = document.getElementById('tab-btn-bookings');
     const tabGroups = document.getElementById('tab-btn-groups');
+    const tabBlacklist = document.getElementById('tab-btn-blacklist');
+
     const contentBookings = document.getElementById('tab-content-bookings');
     const contentGroups = document.getElementById('tab-content-groups');
+    const contentBlacklist = document.getElementById('tab-content-blacklist');
+
+    function resetTabs() {
+      const inactiveClass = 'px-5 py-3 font-bold text-sm rounded-t-xl bg-slate-200 text-slate-600 hover:bg-slate-300 transition';
+      tabBookings.className = inactiveClass;
+      tabGroups.className = inactiveClass;
+      tabBlacklist.className = inactiveClass;
+
+      contentBookings.classList.add('hidden');
+      contentGroups.classList.add('hidden');
+      contentBlacklist.classList.add('hidden');
+    }
+
+    const activeClass = 'px-5 py-3 font-bold text-sm rounded-t-xl bg-white text-emerald-600 border-t-2 border-emerald-600 shadow-sm';
 
     tabBookings.addEventListener('click', () => {
-      tabBookings.className = 'px-5 py-3 font-bold text-sm rounded-t-xl bg-white text-emerald-600 border-t-2 border-emerald-600 shadow-sm';
-      tabGroups.className = 'px-5 py-3 font-bold text-sm rounded-t-xl bg-slate-200 text-slate-600 hover:bg-slate-300 transition';
+      resetTabs();
+      tabBookings.className = activeClass;
       contentBookings.classList.remove('hidden');
-      contentGroups.classList.add('hidden');
       fetchBookings();
     });
 
     tabGroups.addEventListener('click', () => {
-      tabGroups.className = 'px-5 py-3 font-bold text-sm rounded-t-xl bg-white text-emerald-600 border-t-2 border-emerald-600 shadow-sm';
-      tabBookings.className = 'px-5 py-3 font-bold text-sm rounded-t-xl bg-slate-200 text-slate-600 hover:bg-slate-300 transition';
+      resetTabs();
+      tabGroups.className = activeClass;
       contentGroups.classList.remove('hidden');
-      contentBookings.classList.add('hidden');
       fetchGroups();
+    });
+
+    tabBlacklist.addEventListener('click', () => {
+      resetTabs();
+      tabBlacklist.className = activeClass;
+      contentBlacklist.classList.remove('hidden');
+      fetchBlacklist();
     });
 
     function showLogin() {
@@ -525,7 +701,8 @@
 
     document.getElementById('btn-refresh').addEventListener('click', () => {
       if (!contentBookings.classList.contains('hidden')) fetchBookings();
-      else fetchGroups();
+      else if (!contentGroups.classList.contains('hidden')) fetchGroups();
+      else fetchBlacklist();
     });
 
     document.addEventListener('DOMContentLoaded', () => {
