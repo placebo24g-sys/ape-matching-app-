@@ -1,19 +1,27 @@
 import os
 import uuid
 import itertools
+import stripe
 from collections import defaultdict
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 
 from fastapi import FastAPI, HTTPException, status, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from sqlalchemy import create_engine, String, Integer, Column, DateTime, func, select
+from sqlalchemy import create_engine, String, Integer, Column, DateTime, Boolean, ForeignKey, func, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, Session
 
 from linebot.v3.messaging import (
     Configuration, ApiClient, MessagingApi, PushMessageRequest, TextMessage
 )
+
+# ==========================================
+# 0. 外部サービス初期化 (Stripe)
+# ==========================================
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "sk_test_xxx")
+stripe.api_key = STRIPE_SECRET_KEY
 
 # ==========================================
 # 1. データベース設定 & モデル定義
@@ -31,6 +39,40 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 class Base(DeclarativeBase):
     pass
 
+# --- ユーザー情報 ＆ ブラックリスト / キャンセル管理モデル ---
+class UserModel(Base):
+    __tablename__ = "users"
+
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
+    name: Mapped[str] = mapped_column(String)
+    email: Mapped[str] = mapped_column(String, unique=True, index=True)
+    phone_number: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True)
+    gender: Mapped[str] = mapped_column(String)  # 'female', 'male'
+    is_blacklisted: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_warning: Mapped[bool] = mapped_column(Boolean, default=False)
+    has_canceled_first_free: Mapped[bool] = mapped_column(Boolean, default=False)
+    stripe_customer_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
+
+class UserCardFingerprintModel(Base):
+    __tablename__ = "user_card_fingerprints"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.user_id"), index=True)
+    card_fingerprint: Mapped[str] = mapped_column(String, index=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
+
+class CancellationHistoryModel(Base):
+    __tablename__ = "cancellation_histories"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(String, ForeignKey("users.user_id"))
+    booking_id: Mapped[str] = mapped_column(String, ForeignKey("bookings.booking_id"))
+    fee_amount: Mapped[int] = mapped_column(Integer, default=0)
+    is_exempted: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
+
+# --- マッチング＆プロファイル用モデル ---
 class ApeProfileModel(Base):
     __tablename__ = "ape_profiles"
 
@@ -48,7 +90,7 @@ class ApeProfileModel(Base):
 class BookingModel(Base):
     __tablename__ = "bookings"
 
-    booking_id: Mapped[str] = mapped_column(String, primary_primary=True if False else False, primary_key=True)
+    booking_id: Mapped[str] = mapped_column(String, primary_key=True)
     user_id: Mapped[str] = mapped_column(String)
     name: Mapped[str] = mapped_column(String)
     gender: Mapped[str] = mapped_column(String)
@@ -64,7 +106,7 @@ class BookingModel(Base):
     extraversion_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     achievement_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     
-    status: Mapped[str] = mapped_column(String, default="pending")
+    status: Mapped[str] = mapped_column(String, default="pending")  # 'pending', 'matched', 'cancelled'
     group_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
@@ -103,25 +145,19 @@ def send_line_notification(to_user_id: str, message_text: str):
 # ==========================================
 # 3. マッチングコアスコアリング機能（ハイブリッド化）
 # ==========================================
-
-# 💡【判定ロジック】ユーザーの「尖り度（タイプ特徴）」をチェックする
 def is_specialist(user: BookingModel) -> bool:
-    """外向性や達成度などのスコアが高く、特徴が際立っているか判定"""
     e_score = user.extraversion_score or 0
     a_score = user.achievement_score or 0
     return (e_score >= 70 or a_score >= 70)
 
 def calculate_same_type_score(group: List[BookingModel]) -> int:
-    """【同族重視】全員のタイプが同じ＋テンション（外向性・達成度）が近いほど高得点"""
     types = [(m.primary_type or "gorilla").lower() for m in group]
     first_type = types[0]
     
-    # タイプが揃っていない場合はスコア極小
     if not all(t == first_type for t in types):
         return 0
     
     score = 100
-    # 尖りタイプ（スペシャリスト）が含まれている場合、さらに加点
     specialist_count = sum(1 for m in group if is_specialist(m))
     score += specialist_count * 10
 
@@ -135,7 +171,6 @@ def calculate_same_type_score(group: List[BookingModel]) -> int:
     return max(score, 1)
 
 def calculate_balance_score(group: List[BookingModel]) -> int:
-    """【バランス盛り上がり重視】多様なタイプ＋クッション役（ゴリラ・ボノボ）混ざりで高得点"""
     type_counts = {"chimpanzee": 0, "bonobo": 0, "gorilla": 0, "orangutan": 0}
     for m in group:
         t = (m.primary_type or "gorilla").lower()
@@ -154,13 +189,11 @@ def calculate_balance_score(group: List[BookingModel]) -> int:
     else:
         score += 10
 
-    # 極端な組み合わせの減点
     if type_counts["chimpanzee"] >= 3:
         score -= 40
     if type_counts["orangutan"] >= 3:
         score -= 40
 
-    # 盛り上げ役と聞き手の黄金比率加点
     if type_counts["bonobo"] >= 1 or type_counts["gorilla"] >= 1:
         score += 20
 
@@ -170,7 +203,6 @@ def calculate_balance_score(group: List[BookingModel]) -> int:
 
     return max(score, 0)
 
-# 💡【ハイブリッド処理】同族型・バランス型を評価し、ベストなマッチング形式とスコアを返す
 def calculate_hybrid_score(group: List[BookingModel], mode: str = "AUTO") -> tuple[int, str]:
     same_score = calculate_same_type_score(group)
     balance_score = calculate_balance_score(group)
@@ -180,7 +212,6 @@ def calculate_hybrid_score(group: List[BookingModel], mode: str = "AUTO") -> tup
     elif mode == "BALANCE":
         return balance_score, "バランス重視"
     else:
-        # AUTOモード: 同族として完璧（80点以上）なら同族重視、それ以外はバランス重視で高い方を採用
         if same_score >= 80:
             return same_score, "同族重視"
         elif balance_score >= same_score:
@@ -222,6 +253,7 @@ app.add_middleware(
 
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ape_secret_pass_2026")
 
+# --- リクエスト/レスポンススキーマ ---
 class BookingCreate(BaseModel):
     user_id: str
     name: str
@@ -235,16 +267,36 @@ class BookingCreate(BaseModel):
     extraversion_score: Optional[int] = 0
     achievement_score: Optional[int] = 0
 
+class CardRegisterRequest(BaseModel):
+    user_id: str
+    payment_method_id: str
+
+class CancelBookingRequest(BaseModel):
+    user_id: str
+
 # --- 認証チェック補助関数 ---
 def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
     if x_admin_password != ADMIN_PASSWORD:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="パスワードが正しくありません")
     return True
 
-# --- エンドポイント ---
+# ==========================================
+# 5. API エンドポイント
+# ==========================================
 
+# 1. ルートヘルスチェック（Render起動確認用）
+@app.get("/")
+def read_root():
+    return {"status": "ok", "service": "APE Matching API"}
+
+# 2. 予約作成 API
 @app.post("/api/bookings", status_code=status.HTTP_201_CREATED)
 def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
+    # ユーザーがブラックリスト化されていないか事前検証
+    user = db.scalar(select(UserModel).where(UserModel.user_id == booking.user_id))
+    if user and user.is_blacklisted:
+        raise HTTPException(status_code=403, detail="規約違反により予約を受け付けられません")
+
     booking_id = f"bk_{uuid.uuid4().hex[:8]}"
     
     new_booking = BookingModel(
@@ -273,13 +325,82 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
     
     return {"status": "success", "booking_id": booking_id, "message": "予約が保存されました"}
 
+# 3. Stripe カード登録 ＆ 複垢名寄せ・ブラックリストチェック API
+@app.post("/api/users/register-card")
+def register_card(req: CardRegisterRequest, db: Session = Depends(get_db)):
+    user = db.scalar(select(UserModel).where(UserModel.user_id == req.user_id))
+    if not user:
+        raise HTTPException(status_code=404, detail="ユーザーが見つかりません")
+    
+    if user.is_blacklisted:
+        raise HTTPException(status_code=403, detail="このアカウントではカードを登録できません")
 
-# 管理画面用：予約一覧取得 API (GET)
+    try:
+        pm = stripe.PaymentMethod.retrieve(req.payment_method_id)
+        card_fingerprint = pm.card.fingerprint
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Stripeエラー: {str(e)}")
+
+    # 同一カードが過去にブラックリストユーザーで使われていないかチェック
+    existing_cards = db.scalars(
+        select(UserCardFingerprintModel).where(UserCardFingerprintModel.card_fingerprint == card_fingerprint)
+    ).all()
+
+    for record in existing_cards:
+        assoc_user = db.scalar(select(UserModel).where(UserModel.user_id == record.user_id))
+        if assoc_user and assoc_user.is_blacklisted:
+            user.is_blacklisted = True
+            db.commit()
+            raise HTTPException(status_code=403, detail="過去に規約違反があったカードのため受付できません")
+
+    # 正常登録
+    new_card_record = UserCardFingerprintModel(user_id=user.user_id, card_fingerprint=card_fingerprint)
+    db.add(new_card_record)
+    db.commit()
+    return {"status": "success", "card_fingerprint": card_fingerprint}
+
+# 4. 予約キャンセル ＆ 女性初回免除処理 API
+@app.post("/api/bookings/{booking_id}/cancel")
+def cancel_booking(booking_id: str, req: CancelBookingRequest, db: Session = Depends(get_db)):
+    user = db.scalar(select(UserModel).where(UserModel.user_id == req.user_id))
+    booking = db.scalar(select(BookingModel).where(BookingModel.booking_id == booking_id))
+
+    if not booking or booking.user_id != req.user_id:
+        raise HTTPException(status_code=404, detail="該当の予約が見つかりません")
+
+    # 女性 ＆ 初回キャンセル免除の適用判断
+    if user and user.gender == "female" and not user.has_canceled_first_free:
+        user.has_canceled_first_free = True
+        booking.status = "cancelled"
+        
+        history = CancellationHistoryModel(
+            user_id=user.user_id,
+            booking_id=booking.booking_id,
+            fee_amount=0,
+            is_exempted=True
+        )
+        db.add(history)
+        db.commit()
+        return {"status": "cancelled", "fee": 0, "message": "初回のキャンセル料免除が適用されました"}
+
+    # 通常キャンセル料処理 (例: 3,000円)
+    cancellation_fee = 3000
+    booking.status = "cancelled"
+    
+    history = CancellationHistoryModel(
+        user_id=req.user_id,
+        booking_id=booking.booking_id,
+        fee_amount=cancellation_fee,
+        is_exempted=False
+    )
+    db.add(history)
+    db.commit()
+
+    return {"status": "cancelled", "fee": cancellation_fee, "message": f"キャンセル料 {cancellation_fee}円が発生しました"}
+
+# 5. 管理画面用：予約一覧取得 API
 @app.get("/api/bookings")
-def get_bookings(
-    db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin)
-):
+def get_bookings(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
     stmt = select(BookingModel).order_by(BookingModel.created_at.desc())
     bookings = db.scalars(stmt).all()
     
@@ -304,13 +425,9 @@ def get_bookings(
         })
     return result
 
-
-# 管理画面用：成立グループ一覧取得 API (GET)
+# 6. 管理画面用：成立グループ一覧取得 API
 @app.get("/api/matchings")
-def get_matchings(
-    db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin)
-):
+def get_matchings(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
     stmt = select(BookingModel).where(
         BookingModel.status == "matched",
         BookingModel.group_id.isnot(None)
@@ -338,10 +455,10 @@ def get_matchings(
         })
     return result
 
-
+# 7. マッチング実行 API
 @app.post("/api/matchings/run")
 def run_matching(
-    match_mode: str = "AUTO",  # AUTO（自動判定・ミックス）, SAME_TYPE, BALANCE
+    match_mode: str = "AUTO",
     _: bool = Depends(verify_admin),
     db: Session = Depends(get_db)
 ):
@@ -391,7 +508,6 @@ def run_matching(
                     if has_met_before(db, candidate):
                         continue
 
-                    # 💡 ミックスド判定スコアを適用
                     score, matched_type_label = calculate_hybrid_score(candidate, mode=match_mode)
                     
                     if score > 0:
@@ -418,7 +534,6 @@ def run_matching(
                 db.commit()
                 created_groups_count += 1
 
-                # 通知メッセージの作成
                 for member in g["members"]:
                     msg = (
                         f"🎉 【マッチング成立のお知らせ】\n\n"
@@ -433,10 +548,8 @@ def run_matching(
                     if send_line_notification(member.user_id, msg):
                         notified_users_count += 1
 
-    # 第1希望で処理
     process_slots(pending_users, is_second_choice=False)
 
-    # 余った人で第2希望処理
     remaining_users = db.scalars(select(BookingModel).where(BookingModel.status == "pending")).all()
     if remaining_users:
         process_slots(remaining_users, is_second_choice=True)
