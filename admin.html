@@ -86,7 +86,7 @@
     <!-- 1. 予約申し込み一覧タブ -->
     <div id="tab-content-bookings" class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
       <div class="overflow-x-auto">
-        <table class="w-full text-left border-collapse">
+        <table class="w-full text-left border-collapse min-w-[700px]">
           <thead>
             <tr class="bg-slate-50 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
               <th class="p-4">ステータス</th>
@@ -123,7 +123,7 @@
     const loginForm = document.getElementById('login-form');
     const loginError = document.getElementById('login-error');
 
-    // エスケープ関数（XSS対策）
+    // XSS対策エスケープ関数
     function escapeHtml(str) {
       if (str === null || str === undefined) return '';
       return String(str)
@@ -140,6 +140,7 @@
 
     function handleAuthError() {
       sessionStorage.removeItem('ape_admin_password');
+      loginError.innerText = 'パスワードが正しくないか、セッションが切れました。';
       loginError.classList.remove('hidden');
       showLogin();
     }
@@ -160,6 +161,10 @@
 
         if (response.status === 401) {
           return handleAuthError();
+        }
+
+        if (!response.ok) {
+          throw new Error(`HTTP Error: ${response.status}`);
         }
 
         loginError.classList.add('hidden');
@@ -207,7 +212,7 @@
         });
       } catch (error) {
         console.error(error);
-        tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-red-500">データの取得に失敗しました。認証エラーまたは通信環境をご確認ください。</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="p-8 text-center text-red-500"><i class="fa-solid fa-triangle-exclamation mr-2"></i>データの取得に失敗しました。認証情報またはネットワーク設定をご確認ください。</td></tr>`;
       }
     }
 
@@ -229,6 +234,10 @@
           return handleAuthError();
         }
 
+        if (!response.ok) {
+          throw new Error(`HTTP Error: ${response.status}`);
+        }
+
         const groups = await response.json();
         if (!groups || groups.length === 0) {
           container.innerHTML = `<p class="col-span-2 text-center text-slate-400 p-8">まだ成立したマッチンググループはありません。</p>`;
@@ -239,7 +248,7 @@
         groups.forEach(g => {
           const firstMember = g.members && g.members.length > 0 ? g.members[0] : {};
           const card = document.createElement('div');
-          card.className = 'bg-white p-6 rounded-2xl shadow-sm border border-slate-200';
+          card.className = 'bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-between';
           
           let memberListHtml = (g.members || []).map(m => `
             <div class="flex justify-between items-center p-3 bg-slate-50 rounded-xl">
@@ -252,29 +261,56 @@
           `).join('');
 
           card.innerHTML = `
-            <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
-              <div>
-                <span class="text-xs font-mono bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold">${escapeHtml(g.group_id)}</span>
-                <p class="text-xs text-slate-500 mt-1">
-                  <i class="fa-solid fa-location-dot"></i> ${escapeHtml(firstMember.area || '-')} | 
-                  <i class="fa-regular fa-clock"></i> ${firstMember.datetime ? escapeHtml(firstMember.datetime.replace('T', ' ')) : '-'}
-                </p>
+            <div>
+              <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-100">
+                <div>
+                  <span class="text-xs font-mono bg-indigo-50 text-indigo-600 px-2 py-1 rounded font-bold">${escapeHtml(g.group_id)}</span>
+                  <p class="text-xs text-slate-500 mt-1">
+                    <i class="fa-solid fa-location-dot"></i> ${escapeHtml(firstMember.area || '-')} | 
+                    <i class="fa-regular fa-clock"></i> ${firstMember.datetime ? escapeHtml(firstMember.datetime.replace('T', ' ')) : '-'}
+                  </p>
+                </div>
+                <span class="text-xs font-bold bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full">${g.members ? g.members.length : 0}名チーム</span>
               </div>
-              <span class="text-xs font-bold bg-emerald-50 text-emerald-600 px-3 py-1 rounded-full">${g.members ? g.members.length : 0}名チーム</span>
+              <div class="space-y-2 mb-4">
+                ${memberListHtml}
+              </div>
             </div>
-            <div class="space-y-2">
-              ${memberListHtml}
+            <div class="pt-3 border-t border-slate-100 flex justify-end">
+              <button onclick="cancelGroup('${escapeHtml(g.group_id)}')" class="text-xs text-red-500 hover:text-red-700 font-bold flex items-center gap-1 transition">
+                <i class="fa-solid fa-trash-can"></i> グループ解散・リセット
+              </button>
             </div>
           `;
           container.appendChild(card);
         });
       } catch (error) {
         console.error(error);
-        container.innerHTML = `<p class="col-span-2 text-center text-red-500 p-8">エラーが発生しました。</p>`;
+        container.innerHTML = `<p class="col-span-2 text-center text-red-500 p-8"><i class="fa-solid fa-triangle-exclamation mr-2"></i>エラーが発生しました。</p>`;
       }
     }
 
-    // 自動マッチングを実行するボタンの処理（モード対応）
+    // グループ解散リセット機能（API実装時に連携）
+    async function cancelGroup(groupId) {
+      if (!confirm(`グループ [ ${groupId} ] を解散し、メンバーのステータスを待機中に戻しますか？`)) return;
+      const password = getSavedPassword();
+      try {
+        const response = await fetch(`${API_BASE}/matchings/${groupId}`, {
+          method: 'DELETE',
+          headers: { 'X-Admin-Password': password }
+        });
+        if (response.ok) {
+          alert('グループを解散しました');
+          fetchGroups();
+        } else {
+          alert('解散処理に失敗しました (バックエンドAPIの実装をご確認ください)');
+        }
+      } catch (e) {
+        alert('通信エラーが発生しました');
+      }
+    }
+
+    // 自動マッチングを実行するボタンの処理
     document.getElementById('btn-run-match').addEventListener('click', async () => {
       const password = getSavedPassword();
       if (!password) return showLogin();
@@ -291,7 +327,6 @@
         btn.disabled = true;
         btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> 処理中...`;
 
-        // URLパラメータに match_mode を載せてPOSTリクエスト
         const response = await fetch(`${API_BASE}/matchings/run?match_mode=${matchMode}`, {
           method: 'POST',
           headers: { 'X-Admin-Password': password }
