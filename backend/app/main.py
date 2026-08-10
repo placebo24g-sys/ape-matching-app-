@@ -46,9 +46,9 @@ class UserModel(Base):
 
     user_id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String)
-    email: Mapped[str] = mapped_column(String, unique=True, index=True)
+    email: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True, index=True)
     phone_number: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True)
-    gender: Mapped[str] = mapped_column(String)  # 'female', 'male'
+    gender: Mapped[str] = mapped_column(String, default="other")  # 'female', 'male', 'other'
     is_blacklisted: Mapped[bool] = mapped_column(Boolean, default=False)
     is_warning: Mapped[bool] = mapped_column(Boolean, default=False)
     has_canceled_first_free: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -294,10 +294,23 @@ def read_root():
 # 2. 予約作成 API
 @app.post("/api/bookings", status_code=status.HTTP_201_CREATED)
 def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
-    # ユーザーがブラックリスト化されていないか事前検証
+    # ユーザーがDBに存在するかチェックし、存在しなければ自動作成（安全対策）
     user = db.scalar(select(UserModel).where(UserModel.user_id == booking.user_id))
-    if user and user.is_blacklisted:
-        raise HTTPException(status_code=403, detail="規約違反により予約を受け付けられません")
+    if user:
+        if user.is_blacklisted:
+            raise HTTPException(status_code=403, detail="規約違反により予約を受け付けられません")
+    else:
+        # usersテーブルに未登録の場合は初期登録を行う
+        new_user = UserModel(
+            user_id=booking.user_id,
+            name=booking.name,
+            gender=booking.gender
+        )
+        db.add(new_user)
+        try:
+            db.commit()
+        except Exception as e:
+            db.rollback()
 
     booking_id = f"bk_{uuid.uuid4().hex[:8]}"
     
@@ -356,9 +369,14 @@ def register_card(req: CardRegisterRequest, db: Session = Depends(get_db)):
             raise HTTPException(status_code=403, detail="過去に規約違反があったカードのため受付できません")
 
     # 正常登録
-    new_card_record = UserCardFingerprintModel(user_id=user.user_id, card_fingerprint=card_fingerprint)
-    db.add(new_card_record)
-    db.commit()
+    try:
+        new_card_record = UserCardFingerprintModel(user_id=user.user_id, card_fingerprint=card_fingerprint)
+        db.add(new_card_record)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"カード情報登録エラー: {str(e)}")
+        
     return {"status": "success", "card_fingerprint": card_fingerprint}
 
 # 4. 予約キャンセル ＆ 女性初回免除処理 API
@@ -381,8 +399,13 @@ def cancel_booking(booking_id: str, req: CancelBookingRequest, db: Session = Dep
             fee_amount=0,
             is_exempted=True
         )
-        db.add(history)
-        db.commit()
+        try:
+            db.add(history)
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=str(e))
+            
         return {"status": "cancelled", "fee": 0, "message": "初回のキャンセル料免除が適用されました"}
 
     # 通常キャンセル料処理 (例: 3,000円)
@@ -395,8 +418,12 @@ def cancel_booking(booking_id: str, req: CancelBookingRequest, db: Session = Dep
         fee_amount=cancellation_fee,
         is_exempted=False
     )
-    db.add(history)
-    db.commit()
+    try:
+        db.add(history)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
     return {"status": "cancelled", "fee": cancellation_fee, "message": f"キャンセル料 {cancellation_fee}円が発生しました"}
 
