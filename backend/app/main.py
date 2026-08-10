@@ -106,7 +106,6 @@ class ApeProfileModel(Base):
     achievement_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
-# --- ブラックリストモデル (新規追加) ---
 class BlacklistModel(Base):
     __tablename__ = "blacklists"
 
@@ -305,6 +304,13 @@ class CardRegisterRequest(BaseModel):
 class CancelBookingRequest(BaseModel):
     user_id: str
 
+class BlacklistCreateRequest(BaseModel):
+    user_id: Optional[str] = None
+    email: Optional[str] = None
+    phone_number: Optional[str] = None
+    ip_address: Optional[str] = None
+    reason: Optional[str] = "管理者による手動登録"
+
 # --- 認証チェック補助関数 ---
 def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
     if x_admin_password != ADMIN_PASSWORD:
@@ -320,10 +326,9 @@ def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-P
 def read_root():
     return {"status": "ok", "service": "APE Matching API"}
 
-# 2. 予約作成 API (ブラックリスト判定処理を追加)
+# 2. 予約作成 API (ブラックリスト判定処理含む)
 @app.post("/api/bookings", status_code=status.HTTP_201_CREATED)
 def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
-    # --- 【追加】ブラックリスト判定 (user_id / email / phone_number) ---
     conditions = [BlacklistModel.user_id == booking.user_id]
     if booking.email:
         conditions.append(BlacklistModel.email == booking.email)
@@ -339,7 +344,6 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
             detail="現在、このアカウントからのご予約・操作は受け付けることができません。"
         )
 
-    # ユーザーモデルの確認・作成
     user = db.scalar(select(UserModel).where(UserModel.user_id == booking.user_id))
     if user:
         if user.is_blacklisted:
@@ -644,6 +648,75 @@ def run_matching(
         "notified_users": notified_users_count,
         "message": f"{created_groups_count} 件のグループが作られ、{notified_users_count} 名にLINE通知が送信されました。"
     }
+
+# 8. 管理画面用：ブラックリスト一覧取得 API
+@app.get("/api/admin/blacklists")
+def get_blacklists(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    stmt = select(BlacklistModel).order_by(BlacklistModel.created_at.desc())
+    blacklists = db.scalars(stmt).all()
+    
+    result = []
+    for item in blacklists:
+        result.append({
+            "id": item.id,
+            "user_id": item.user_id,
+            "email": item.email,
+            "phone_number": item.phone_number,
+            "ip_address": item.ip_address,
+            "reason": item.reason,
+            "created_at": item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else None
+        })
+    return result
+
+# 9. 管理画面用：ブラックリスト手動登録 API
+@app.post("/api/admin/blacklists", status_code=status.HTTP_201_CREATED)
+def add_to_blacklist(req: BlacklistCreateRequest, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    if not any([req.user_id, req.email, req.phone_number, req.ip_address]):
+        raise HTTPException(status_code=400, detail="user_id, email, phone_number, ip_address のいずれか1つ以上は必須です")
+
+    new_entry = BlacklistModel(
+        user_id=req.user_id,
+        email=req.email,
+        phone_number=req.phone_number,
+        ip_address=req.ip_address,
+        reason=req.reason
+    )
+    
+    if req.user_id:
+        user = db.scalar(select(UserModel).where(UserModel.user_id == req.user_id))
+        if user:
+            user.is_blacklisted = True
+
+    try:
+        db.add(new_entry)
+        db.commit()
+        db.refresh(new_entry)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"ブラックリスト登録に失敗しました: {str(e)}")
+
+    return {"status": "success", "id": new_entry.id, "message": "ブラックリストに追加しました"}
+
+# 10. 管理画面用：ブラックリスト解除（削除） API
+@app.delete("/api/admin/blacklists/{blacklist_id}")
+def remove_from_blacklist(blacklist_id: int, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    entry = db.scalar(select(BlacklistModel).where(BlacklistModel.id == blacklist_id))
+    if not entry:
+        raise HTTPException(status_code=404, detail="該当のブラックリストデータが見つかりません")
+
+    if entry.user_id:
+        user = db.scalar(select(UserModel).where(UserModel.user_id == entry.user_id))
+        if user:
+            user.is_blacklisted = False
+
+    try:
+        db.delete(entry)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"ブラックリスト解除に失敗しました: {str(e)}")
+
+    return {"status": "success", "message": "ブラックリストから削除（解除）しました"}
 
 # Local 実行用エントリーポイント
 if __name__ == "__main__":
