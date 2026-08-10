@@ -311,6 +311,9 @@ class BlacklistCreateRequest(BaseModel):
     ip_address: Optional[str] = None
     reason: Optional[str] = "管理者による手動登録"
 
+class ManualMatchRequest(BaseModel):
+    booking_ids: List[str]
+
 # --- 認証チェック補助関数 ---
 def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
     if x_admin_password != ADMIN_PASSWORD:
@@ -539,7 +542,7 @@ def get_matchings(db: Session = Depends(get_db), _: bool = Depends(verify_admin)
         })
     return result
 
-# 7. マッチング実行 API
+# 7. マッチング自動実行 API
 @app.post("/api/matchings/run")
 def run_matching(
     match_mode: str = "AUTO",
@@ -649,7 +652,78 @@ def run_matching(
         "message": f"{created_groups_count} 件のグループが作られ、{notified_users_count} 名にLINE通知が送信されました。"
     }
 
-# 8. 管理画面用：ブラックリスト一覧取得 API
+# 8. 管理画面用：手動グループ割当 API 【追加】
+@app.post("/api/matchings/manual")
+def create_manual_matching(
+    req: ManualMatchRequest,
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_admin)
+):
+    if len(req.booking_ids) < 2:
+        raise HTTPException(
+            status_code=400,
+            detail="グループ作成には最低2名のユーザー選択が必要です"
+        )
+
+    stmt = select(BookingModel).where(
+        or_(
+            BookingModel.booking_id.in_(req.booking_ids),
+            BookingModel.user_id.in_(req.booking_ids)
+        )
+    )
+    bookings = db.scalars(stmt).all()
+
+    if not bookings:
+        raise HTTPException(status_code=404, detail="対象の予約データが見つかりません")
+
+    new_group_id = f"grp_{uuid.uuid4().hex[:8]}"
+    for booking in bookings:
+        booking.status = "matched"
+        booking.group_id = new_group_id
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"手動割り当てに失敗しました: {str(e)}")
+
+    return {
+        "status": "success",
+        "message": "手動グループ割当が完了しました",
+        "group_id": new_group_id,
+        "member_count": len(bookings)
+    }
+
+# 9. 管理画面用：グループ解散 API 【追加】
+@app.delete("/api/matchings/{group_id}")
+def cancel_matching_group(
+    group_id: str,
+    db: Session = Depends(get_db),
+    _: bool = Depends(verify_admin)
+):
+    stmt = select(BookingModel).where(BookingModel.group_id == group_id)
+    bookings = db.scalars(stmt).all()
+
+    if not bookings:
+        raise HTTPException(
+            status_code=404,
+            detail="指定されたグループが存在しないか、すでに解散されています"
+        )
+
+    for booking in bookings:
+        booking.status = "pending"
+        booking.group_id = None
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"グループ解散処理に失敗しました: {str(e)}")
+
+    return {"status": "success", "message": f"グループ [{group_id}] を解散し、メンバーを待機中に戻しました"}
+
+# 10. 管理画面用：ブラックリスト一覧取得 API
+@app.get("/api/admin/blacklist")
 @app.get("/api/admin/blacklists")
 def get_blacklists(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
     stmt = select(BlacklistModel).order_by(BlacklistModel.created_at.desc())
@@ -668,7 +742,8 @@ def get_blacklists(db: Session = Depends(get_db), _: bool = Depends(verify_admin
         })
     return result
 
-# 9. 管理画面用：ブラックリスト手動登録 API
+# 11. 管理画面用：ブラックリスト手動登録 API
+@app.post("/api/admin/blacklist", status_code=status.HTTP_201_CREATED)
 @app.post("/api/admin/blacklists", status_code=status.HTTP_201_CREATED)
 def add_to_blacklist(req: BlacklistCreateRequest, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
     if not any([req.user_id, req.email, req.phone_number, req.ip_address]):
@@ -697,10 +772,17 @@ def add_to_blacklist(req: BlacklistCreateRequest, db: Session = Depends(get_db),
 
     return {"status": "success", "id": new_entry.id, "message": "ブラックリストに追加しました"}
 
-# 10. 管理画面用：ブラックリスト解除（削除） API
-@app.delete("/api/admin/blacklists/{blacklist_id}")
-def remove_from_blacklist(blacklist_id: int, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
-    entry = db.scalar(select(BlacklistModel).where(BlacklistModel.id == blacklist_id))
+# 12. 管理画面用：ブラックリスト解除（削除） API
+@app.delete("/api/admin/blacklist/{user_or_id}")
+@app.delete("/api/admin/blacklists/{user_or_id}")
+def remove_from_blacklist(user_or_id: str, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    # ID(数値) または user_id(文字列) の両方で検索可能に対応
+    if user_or_id.isdigit():
+        stmt = select(BlacklistModel).where(or_(BlacklistModel.id == int(user_or_id), BlacklistModel.user_id == user_or_id))
+    else:
+        stmt = select(BlacklistModel).where(BlacklistModel.user_id == user_or_id)
+
+    entry = db.scalar(stmt)
     if not entry:
         raise HTTPException(status_code=404, detail="該当のブラックリストデータが見つかりません")
 
