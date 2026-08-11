@@ -39,12 +39,11 @@ STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "sk_test_xxx")
 stripe.api_key = STRIPE_SECRET_KEY
 
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
-LINE_CHANNEL_ID = os.getenv("LINE_CHANNEL_ID")  # LIFF ID Token検証用 (オプション)
+LINE_CHANNEL_ID = os.getenv("LINE_CHANNEL_ID")
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ape_secret_pass_2026")
 
-# AI予約サーバー連携用設定
-AI_BOOKING_WEBHOOK_URL = os.getenv("AI_BOOKING_WEBHOOK_URL", "")  # 連携先AI予約サーバーのURL
-AI_BOOKING_API_KEY = os.getenv("AI_BOOKING_API_KEY", "")          # 連携用APIキー
+AI_BOOKING_WEBHOOK_URL = os.getenv("AI_BOOKING_WEBHOOK_URL", "")
+AI_BOOKING_API_KEY = os.getenv("AI_BOOKING_API_KEY", "")
 
 # ==========================================
 # 1. データベース設定 (Supabase / PostgreSQL対応)
@@ -53,7 +52,6 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ape_app.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-# Supabase等PostgreSQL接続時にコネクションプールを最適化
 engine_args = {}
 if DATABASE_URL.startswith("postgresql"):
     engine_args = {
@@ -74,7 +72,7 @@ class Base(DeclarativeBase):
 class UserModel(Base):
     __tablename__ = "users"
 
-    user_id: Mapped[str] = mapped_column(String, primary_key=True)  # LINEのuserId or Web用ID
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)
     name: Mapped[str] = mapped_column(String)
     email: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True, index=True)
     phone_number: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True)
@@ -118,8 +116,8 @@ class ApeProfileModel(Base):
     score_bonobo: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     score_gorilla: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     score_orangutan: Mapped[Optional[int]] = mapped_column(Integer, default=0)
-    extraversion_score: Optional[int] = mapped_column(Integer, default=0)
-    achievement_score: Optional[int] = mapped_column(Integer, default=0)
+    extraversion_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    achievement_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
 class BlacklistModel(Base):
@@ -317,7 +315,7 @@ class LiffAuthRequest(BaseModel):
     access_token: Optional[str] = None
 
 class BookingCreateLIFF(BaseModel):
-    access_token: Optional[str] = None  # ブラウザからの場合は空でもOK
+    access_token: Optional[str] = None
     name: str
     gender: str
     age: Optional[int] = None
@@ -423,7 +421,6 @@ def authenticate_liff_user(req: LiffAuthRequest, db: Session = Depends(get_db)):
 def create_booking_via_liff(booking: BookingCreateLIFF, db: Session = Depends(get_db)):
     user_id = None
 
-    # 1. LINEアクセストークンがある場合はLINEユーザーとして特定
     if booking.access_token and booking.access_token != "dummy_token":
         try:
             line_user = verify_liff_token(booking.access_token)
@@ -431,7 +428,6 @@ def create_booking_via_liff(booking: BookingCreateLIFF, db: Session = Depends(ge
         except Exception:
             pass
 
-    # 2. LINEトークンがない（＝通常のWebブラウザ）場合
     if not user_id:
         if booking.email:
             existing_user = db.scalar(select(UserModel).where(UserModel.email == booking.email))
@@ -441,7 +437,6 @@ def create_booking_via_liff(booking: BookingCreateLIFF, db: Session = Depends(ge
         if not user_id:
             user_id = f"web_{uuid.uuid4().hex[:10]}"
 
-    # ブラックリストチェック
     conditions = [BlacklistModel.user_id == user_id]
     if booking.email:
         conditions.append(BlacklistModel.email == booking.email)
@@ -452,7 +447,6 @@ def create_booking_via_liff(booking: BookingCreateLIFF, db: Session = Depends(ge
     if blacklisted_entry:
         raise HTTPException(status_code=403, detail="現在、このアカウントからのご予約・操作は受け付けることができません。")
 
-    # ユーザーの登録・更新
     user = db.scalar(select(UserModel).where(UserModel.user_id == user_id))
     if user:
         if user.is_blacklisted:
@@ -496,12 +490,10 @@ def create_booking_via_liff(booking: BookingCreateLIFF, db: Session = Depends(ge
         db.rollback()
         raise HTTPException(status_code=500, detail=f"予約処理に失敗しました: {str(e)}")
 
-    # LINEユーザーの場合のみLINE通知を送信
     if user_id.startswith("U"):
         msg = f"【予約受付完了】\n{booking.name} 様\n\nご予約を受け付けました。\n■ エリア: {booking.area}\n■ 希望日時: {booking.datetime.replace('T', ' ')}\n\nマッチングが完了次第、こちらに通知いたします。"
         send_line_notification(user_id, msg)
 
-    # 外部のAI予約サーバーへWebhook送信
     notify_ai_booking_server({
         "event_type": "new_booking",
         "booking_id": booking_id,
