@@ -151,10 +151,6 @@ def get_db():
 # 2. LIFF / LINE トークン検証機能
 # ==========================================
 def verify_liff_token(access_token: str) -> dict:
-    """
-    LIFF(liff.getAccessToken())で取得したアクセストークンをLINE公式APIで検証し、
-    LINEのuserId等のプロフィール情報を返却する関数
-    """
     url = "https://api.line.me/v2/profile"
     headers = {"Authorization": f"Bearer {access_token}"}
     resp = requests.get(url, headers=headers, timeout=5)
@@ -164,7 +160,7 @@ def verify_liff_token(access_token: str) -> dict:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="無効なLINEアクセストークンです。"
         )
-    return resp.json()  # {"userId": "...", "displayName": "...", "pictureUrl": "..."}
+    return resp.json()
 
 def send_line_notification(to_user_id: str, message_text: str) -> bool:
     if not LINE_CHANNEL_ACCESS_TOKEN:
@@ -294,12 +290,11 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-# --- スキーマ定義 ---
 class LiffAuthRequest(BaseModel):
     access_token: str
 
 class BookingCreateLIFF(BaseModel):
-    access_token: str  # LIFFから渡されるアクセストークン
+    access_token: str
     name: str
     gender: str
     age: Optional[int] = None
@@ -353,14 +348,8 @@ def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-P
 def read_root():
     return {"status": "ok", "service": "APE Matching API with LIFF Support"}
 
-# ------------------------------------------
-# A. LIFF認証・ユーザー情報取得 API
-# ------------------------------------------
 @app.post("/api/auth/liff")
 def authenticate_liff_user(req: LiffAuthRequest, db: Session = Depends(get_db)):
-    """
-    LIFFで取得した access_token を検証し、DB内のユーザー情報を返す
-    """
     line_user = verify_liff_token(req.access_token)
     user_id = line_user.get("userId")
 
@@ -390,16 +379,11 @@ def authenticate_liff_user(req: LiffAuthRequest, db: Session = Depends(get_db)):
             }
         }
 
-# ------------------------------------------
-# B. LIFF経由の予約作成 API
-# ------------------------------------------
 @app.post("/api/bookings/liff", status_code=status.HTTP_201_CREATED)
 def create_booking_via_liff(booking: BookingCreateLIFF, db: Session = Depends(get_db)):
-    # 1. LIFF トークンから LINE user_id を安全に取得
     line_user = verify_liff_token(booking.access_token)
     user_id = line_user.get("userId")
 
-    # 2. ブラックリストチェック
     conditions = [BlacklistModel.user_id == user_id]
     if booking.email:
         conditions.append(BlacklistModel.email == booking.email)
@@ -410,7 +394,6 @@ def create_booking_via_liff(booking: BookingCreateLIFF, db: Session = Depends(ge
     if blacklisted_entry:
         raise HTTPException(status_code=403, detail="現在、このアカウントからのご予約・操作は受け付けることができません。")
 
-    # 3. ユーザーデータの作成または更新
     user = db.scalar(select(UserModel).where(UserModel.user_id == user_id))
     if user:
         if user.is_blacklisted:
@@ -429,7 +412,6 @@ def create_booking_via_liff(booking: BookingCreateLIFF, db: Session = Depends(ge
         )
         db.add(user)
 
-    # 4. 予約レコード作成
     booking_id = f"bk_{uuid.uuid4().hex[:8]}"
     new_booking = BookingModel(
         booking_id=booking_id,
@@ -455,15 +437,11 @@ def create_booking_via_liff(booking: BookingCreateLIFF, db: Session = Depends(ge
         db.rollback()
         raise HTTPException(status_code=500, detail=f"予約処理に失敗しました: {str(e)}")
 
-    # 5. LINEで予約完了のPush通知を送信
     msg = f"【予約受付完了】\n{booking.name} 様\n\nご予約を受け付けました。\n■ エリア: {booking.area}\n■ 希望日時: {booking.datetime.replace('T', ' ')}\n\nマッチングが完了次第、こちらに通知いたします。"
     send_line_notification(user_id, msg)
 
     return {"status": "success", "booking_id": booking_id, "user_id": user_id, "message": "予約が完了しました"}
 
-# ------------------------------------------
-# C. 既存の各種API (診断・カード・キャンセル・管理機能)
-# ------------------------------------------
 @app.post("/api/ape-profiles", status_code=status.HTTP_201_CREATED)
 def create_ape_profile(profile: ApeProfileCreate, db: Session = Depends(get_db)):
     profile_id = f"prof_{uuid.uuid4().hex[:8]}"
@@ -572,7 +550,6 @@ def cancel_booking(booking_id: str, req: CancelBookingRequest, db: Session = Dep
 
     return {"status": "cancelled", "fee": cancellation_fee, "message": f"キャンセル料 {cancellation_fee}円が発生しました"}
 
-# --- 管理画面用 API ---
 @app.get("/api/bookings")
 def get_bookings(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
     bookings = db.scalars(select(BookingModel).order_by(BookingModel.created_at.desc())).all()
@@ -635,7 +612,9 @@ def run_matching(match_mode: str = "AUTO", _: bool = Depends(verify_admin), db: 
                     if score > 0:
                         possible_groups.append({"score": score, "label": label, "members": candidate, "b_ids": [m.booking_id for m in candidate]})
 
-            possible_groups.sort(key=x: x["score"], reverse=True)
+            # 修正箇所: lambdaを追加
+            possible_groups.sort(key=lambda x: x["score"], reverse=True)
+            
             for g in possible_groups:
                 if any(b_id in used_booking_ids for b_id in g["b_ids"]): continue
                 group_id = f"grp_{uuid.uuid4().hex[:8]}"
