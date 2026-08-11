@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- html2canvas (画像生成用) -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-  <!-- LINE LIFF SDK (読み込み失敗時もエラー落ちしないようonerrorを設定) -->
+  <!-- LINE LIFF SDK -->
   <script src="https://static.line.scdn.co/liff/edge/2/sdk.js" onerror="window.liffLoadError = true;"></script>
 </head>
 <body class="bg-slate-100 min-h-screen text-slate-800 flex flex-col justify-between font-sans">
@@ -94,7 +94,7 @@
 
           <div class="bg-slate-50 p-4 rounded-xl border border-slate-100 space-y-2 text-xs">
             <div class="flex justify-between items-center">
-              <span class="font-bold text-slate-500">感情表出軸:</span>
+              <span class="font-bold text-slate-500">感情表現軸:</span>
               <span id="axis-e-i" class="font-semibold text-slate-700">--</span>
             </div>
             <div class="flex justify-between items-center">
@@ -266,7 +266,7 @@
       let userId = localStorage.getItem('ape_user_id');
       let lineDisplayName = '';
 
-      // --- LIFF SDK 安全な初期化 (ネットワークエラーでliffが存在しない場合も分岐保護) ---
+      // --- LIFF SDK 安全な初期化 ---
       if (typeof liff !== 'undefined' && !window.liffLoadError) {
         try {
           await liff.init({ liffId: LIFF_ID });
@@ -364,7 +364,7 @@
       const typeMaster = {
         CHIMPANZEE: { name: 'チンパンジー型', catchphrase: '勝ち気に挑む情熱のチャレンジャー', description: '感情表現が豊かで、成果や勝ち負けにこだわるエネルギッシュなタイプ。高い目標に向かってチームを牽引する力がありますが、時に積極的すぎる面も。', headerBg: 'bg-red-600', badgeBg: 'bg-red-500' },
         BONOBO: { name: 'ボノボ型', catchphrase: '共感と調和を愛するムードメーカー', description: '感情表現が豊かで、みんなとの共感や人間関係の調和を最も重視するタイプ。雰囲気を明るくし、チームの連帯感を高めるのが得意です。', headerBg: 'bg-pink-600', badgeBg: 'bg-pink-500' },
-        GORILLA: { name: 'ゴリラ型', catchphrase: '安心と平和を守る頼れる守護者', description: '感情を表に強く出さず,秩序や平和、確実なプロセスを重視するタイプ。安定感があり、周囲に安心感を与える信頼できる存在です。', headerBg: 'bg-amber-600', badgeBg: 'bg-amber-500' },
+        GORILLA: { name: 'ゴリラ型', catchphrase: '安心と平和を守る頼れる守護者', description: '感情を表に強く出さず、秩序や平和、確実なプロセスを重視するタイプ。安定感があり、周囲に安心感を与える信頼できる存在です。', headerBg: 'bg-amber-600', badgeBg: 'bg-amber-500' },
         ORANGUTAN: { name: 'オランウータン型', catchphrase: '独自の世界で真理を探求するスペシャリスト', description: '感情をあまり表に出さず、自分のペースや納得感を大切にしながら成果や課題解決に向き合うタイプ。論理的で職人的な深い思考力を持ちます。', headerBg: 'bg-blue-600', badgeBg: 'bg-blue-500' }
       };
 
@@ -405,7 +405,7 @@
       btnNext.addEventListener('click', goToNextQuestion);
       btnRestart.addEventListener('click', restartQuiz);
 
-      // --- LINE友達宛て共有 ---
+      // --- LINE 友達宛て共有 ---
       if (btnShareLine) {
         btnShareLine.addEventListener('click', async () => {
           if (typeof liff === 'undefined' || window.liffLoadError) {
@@ -424,7 +424,7 @@
               const res = await liff.shareTargetPicker([
                 {
                   type: 'text',
-                  text: `【類人猿タイプ診断】\n私の診断結果は【${typeInfo.name}】（${typeInfo.catchphrase}）でした！\n\nXでのシェアや診断はこちらから試してみてね👇\n${window.location.href}`
+                  text: `【類人猿タイプ診断】\n私の診断結果は【${typeInfo.name}】（${typeInfo.catchphrase}）でした！\n\n診断はこちらから試してみてね👇\n${window.location.href}`
                 }
               ]);
               if (res) {
@@ -668,7 +668,7 @@
         const bonoboScore = scoreE + scoreG;
         const gorillaScore = scoreI + scoreG;
         const orangutanScore = scoreI + scoreA;
-        const totalPoints = chimpanzeeScore + bonoboScore + gorillaScore + orangutanScore;
+        const totalPoints = chimpanzeeScore + bonoboScore + gorillaScore + orangutanScore || 1;
 
         const profiles = {
           CHIMPANZEE: Math.round((chimpanzeeScore / totalPoints) * 100),
@@ -679,7 +679,7 @@
 
         const isE = scoreE >= scoreI;
         const isA = scoreA >= scoreG;
-        let primaryType = isE ? (isA ? 'CHIMPANZEE' : 'BONOBO') : (isA ? 'ORANGUTAN' : 'GORILLA');
+        const primaryType = isE ? (isA ? 'CHIMPANZEE' : 'BONOBO') : (isA ? 'ORANGUTAN' : 'GORILLA');
 
         return { primaryType, scoreE, scoreI, scoreA, scoreG, profiles };
       }
