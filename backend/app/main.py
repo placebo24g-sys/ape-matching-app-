@@ -74,7 +74,7 @@ class Base(DeclarativeBase):
 class UserModel(Base):
     __tablename__ = "users"
 
-    user_id: Mapped[str] = mapped_column(String, primary_key=True)  # LINEのuserId
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)  # LINEのuserId or Web用ID
     name: Mapped[str] = mapped_column(String)
     email: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True, index=True)
     phone_number: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True)
@@ -118,8 +118,8 @@ class ApeProfileModel(Base):
     score_bonobo: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     score_gorilla: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     score_orangutan: Mapped[Optional[int]] = mapped_column(Integer, default=0)
-    extraversion_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
-    achievement_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
+    extraversion_score: Optional[int] = mapped_column(Integer, default=0)
+    achievement_score: Optional[int] = mapped_column(Integer, default=0)
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
 class BlacklistModel(Base):
@@ -176,8 +176,7 @@ def verify_liff_token(access_token: str) -> dict:
     return resp.json()
 
 def send_line_notification(to_user_id: str, message_text: str) -> bool:
-    if not LINE_CHANNEL_ACCESS_TOKEN:
-        print("[LINE Notice] ACCESS_TOKEN 未設定のためスキップ")
+    if not LINE_CHANNEL_ACCESS_TOKEN or not to_user_id.startswith("U"):
         return False
     try:
         configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
@@ -194,14 +193,12 @@ def send_line_notification(to_user_id: str, message_text: str) -> bool:
         return False
 
 def notify_ai_booking_server(booking_data: dict):
-    """新規予約発生時にAI予約サーバーへWebhookを非同期または同期送信する"""
     if not AI_BOOKING_WEBHOOK_URL:
         return
     try:
         headers = {"Content-Type": "application/json"}
         if AI_BOOKING_API_KEY:
             headers["Authorization"] = f"Bearer {AI_BOOKING_API_KEY}"
-        
         requests.post(AI_BOOKING_WEBHOOK_URL, json=booking_data, headers=headers, timeout=5)
     except Exception as e:
         print(f"[Webhook Error] AI予約サーバーへの送信に失敗しました: {e}")
@@ -305,7 +302,7 @@ def has_met_before(db: Session, candidate_users: List[BookingModel]) -> bool:
 # ==========================================
 # 4. FastAPI アプリケーション定義
 # ==========================================
-app = FastAPI(title="類人猿マッチング API (Supabase & AI予約連携対応)")
+app = FastAPI(title="類人猿マッチング API (ブラウザ・LINE両対応)")
 
 app.add_middleware(
     CORSMiddleware,
@@ -317,10 +314,10 @@ app.add_middleware(
 )
 
 class LiffAuthRequest(BaseModel):
-    access_token: str
+    access_token: Optional[str] = None
 
 class BookingCreateLIFF(BaseModel):
-    access_token: str
+    access_token: Optional[str] = None  # ブラウザからの場合は空でもOK
     name: str
     gender: str
     age: Optional[int] = None
@@ -361,9 +358,8 @@ class BlacklistCreateRequest(BaseModel):
 class ManualMatchRequest(BaseModel):
     booking_ids: List[str]
 
-# AI予約サーバーからのWebhook受信用スキーマ
 class AIWebhookReceiveRequest(BaseModel):
-    event_type: str  # 例: "ai_booking_status_update" など
+    event_type: str
     booking_id: str
     status: Optional[str] = None
     group_id: Optional[str] = None
@@ -380,15 +376,25 @@ def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-P
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "service": "APE Matching API with Supabase & AI Webhook"}
+    return {"status": "ok", "service": "APE Matching API with Browser & LINE support"}
 
 @app.post("/api/auth/liff")
 def authenticate_liff_user(req: LiffAuthRequest, db: Session = Depends(get_db)):
-    line_user = verify_liff_token(req.access_token)
-    user_id = line_user.get("userId")
+    user_id = None
+    display_name = "ゲストユーザー"
+
+    if req.access_token and req.access_token != "dummy_token":
+        try:
+            line_user = verify_liff_token(req.access_token)
+            user_id = line_user.get("userId")
+            display_name = line_user.get("displayName", display_name)
+        except Exception:
+            pass
+
+    if not user_id:
+        return {"status": "success", "is_registered": False, "line_profile": {"user_id": None, "display_name": display_name}}
 
     user = db.scalar(select(UserModel).where(UserModel.user_id == user_id))
-    
     if user:
         if user.is_blacklisted:
             raise HTTPException(status_code=403, detail="このアカウントは利用が制限されています。")
@@ -409,15 +415,33 @@ def authenticate_liff_user(req: LiffAuthRequest, db: Session = Depends(get_db)):
             "is_registered": False,
             "line_profile": {
                 "user_id": user_id,
-                "display_name": line_user.get("displayName")
+                "display_name": display_name
             }
         }
 
 @app.post("/api/bookings/liff", status_code=status.HTTP_201_CREATED)
 def create_booking_via_liff(booking: BookingCreateLIFF, db: Session = Depends(get_db)):
-    line_user = verify_liff_token(booking.access_token)
-    user_id = line_user.get("userId")
+    user_id = None
 
+    # 1. LINEアクセストークンがある場合はLINEユーザーとして特定
+    if booking.access_token and booking.access_token != "dummy_token":
+        try:
+            line_user = verify_liff_token(booking.access_token)
+            user_id = line_user.get("userId")
+        except Exception:
+            pass
+
+    # 2. LINEトークンがない（＝通常のWebブラウザ）場合
+    if not user_id:
+        if booking.email:
+            existing_user = db.scalar(select(UserModel).where(UserModel.email == booking.email))
+            if existing_user:
+                user_id = existing_user.user_id
+        
+        if not user_id:
+            user_id = f"web_{uuid.uuid4().hex[:10]}"
+
+    # ブラックリストチェック
     conditions = [BlacklistModel.user_id == user_id]
     if booking.email:
         conditions.append(BlacklistModel.email == booking.email)
@@ -428,6 +452,7 @@ def create_booking_via_liff(booking: BookingCreateLIFF, db: Session = Depends(ge
     if blacklisted_entry:
         raise HTTPException(status_code=403, detail="現在、このアカウントからのご予約・操作は受け付けることができません。")
 
+    # ユーザーの登録・更新
     user = db.scalar(select(UserModel).where(UserModel.user_id == user_id))
     if user:
         if user.is_blacklisted:
@@ -471,9 +496,10 @@ def create_booking_via_liff(booking: BookingCreateLIFF, db: Session = Depends(ge
         db.rollback()
         raise HTTPException(status_code=500, detail=f"予約処理に失敗しました: {str(e)}")
 
-    # ユーザーへLINE通知
-    msg = f"【予約受付完了】\n{booking.name} 様\n\nご予約を受け付けました。\n■ エリア: {booking.area}\n■ 希望日時: {booking.datetime.replace('T', ' ')}\n\nマッチングが完了次第、こちらに通知いたします。"
-    send_line_notification(user_id, msg)
+    # LINEユーザーの場合のみLINE通知を送信
+    if user_id.startswith("U"):
+        msg = f"【予約受付完了】\n{booking.name} 様\n\nご予約を受け付けました。\n■ エリア: {booking.area}\n■ 希望日時: {booking.datetime.replace('T', ' ')}\n\nマッチングが完了次第、こちらに通知いたします。"
+        send_line_notification(user_id, msg)
 
     # 外部のAI予約サーバーへWebhook送信
     notify_ai_booking_server({
@@ -490,7 +516,6 @@ def create_booking_via_liff(booking: BookingCreateLIFF, db: Session = Depends(ge
 
 @app.post("/api/ai/webhook")
 def receive_ai_webhook(payload: AIWebhookReceiveRequest, db: Session = Depends(get_db)):
-    """AI予約サーバー側からの結果（ステータス変更や自動手配結果）を受信するエンドポイント"""
     booking = db.scalar(select(BookingModel).where(BookingModel.booking_id == payload.booking_id))
     if not booking:
         raise HTTPException(status_code=404, detail="対象の予約が見つかりません")
@@ -506,7 +531,6 @@ def receive_ai_webhook(payload: AIWebhookReceiveRequest, db: Session = Depends(g
         db.rollback()
         raise HTTPException(status_code=500, detail=f"DB更新エラー: {str(e)}")
 
-    # メッセージがあればユーザーにLINE通知を送る
     if payload.message and booking.user_id:
         send_line_notification(booking.user_id, payload.message)
 
@@ -682,7 +706,6 @@ def run_matching(match_mode: str = "AUTO", _: bool = Depends(verify_admin), db: 
                     if score > 0:
                         possible_groups.append({"score": score, "label": label, "members": candidate, "b_ids": [m.booking_id for m in candidate]})
 
-            # lambdaを追加して修正済みのソート処理
             possible_groups.sort(key=lambda x: x["score"], reverse=True)
             
             for g in possible_groups:
