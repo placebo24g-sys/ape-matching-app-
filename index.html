@@ -31,7 +31,7 @@
         <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-800 text-xs font-bold rounded-full">簡単 12 質問</span>
         <h2 class="text-2xl font-bold text-slate-900">あなたの「類人猿タイプ」を診断</h2>
         <p class="text-sm text-slate-600 leading-relaxed">
-          感情表現と欲求の方向性から、あなたが隠れた思考癖からどの類人猿タイプ（チンパンジー・ボノボ・ゴリラ・オランウータン）にあてはまるかを判定します。
+          感情表現と欲求の方向性から、あなたの隠れた思考癖からどの類人猿タイプ（チンパンジー・ボノボ・ゴリラ・オランウータン）にあてはまるかを判定します。
         </p>
       </div>
 
@@ -260,17 +260,22 @@
   <script>
     document.addEventListener('DOMContentLoaded', async () => {
       const API_URL = 'https://ape-matching-api.onrender.com/api/ape-profiles';
-      const BOOKING_API_URL = 'https://ape-matching-api.onrender.com/api/bookings';
+      // LIFF対応エンドポイントに変更
+      const BOOKING_API_URL = 'https://ape-matching-api.onrender.com/api/bookings/liff';
       const LIFF_ID = '201105035-m8KsfnMs';
 
       let userId = localStorage.getItem('ape_user_id');
       let lineDisplayName = '';
+      let accessToken = null;
 
       // 安全なLIFF初期化判定
       if (typeof liff !== 'undefined') {
         try {
           await liff.init({ liffId: LIFF_ID });
           if (liff.isLoggedIn()) {
+            // LIFFアクセストークンを取得（バックエンド認証で使用）
+            accessToken = liff.getAccessToken();
+
             const profile = await liff.getProfile();
             userId = profile.userId;
             lineDisplayName = profile.displayName;
@@ -405,7 +410,7 @@
       btnNext.addEventListener('click', goToNextQuestion);
       btnRestart.addEventListener('click', restartQuiz);
 
-      // LINE共有ボタン処理（安全なフォールバック付き）
+      // LINE共有ボタン処理
       if (btnShareLine) {
         btnShareLine.addEventListener('click', async () => {
           const typeInfo = latestResult ? typeMaster[latestResult.primaryType] : typeMaster['GORILLA'];
@@ -424,7 +429,6 @@
               console.error('TargetPicker送信エラー:', error);
             }
           } else {
-            // PCや通常のWebブラウザの場合のフォールバック
             const lineUrl = `https://line.me/R/share?text=${encodeURIComponent(shareMessage)}`;
             window.open(lineUrl, '_blank');
           }
@@ -505,14 +509,16 @@
 
       btnNoticeCancel.addEventListener('click', () => noticeModal.classList.add('hidden'));
 
+      // 同意して予約を確定するボタン（LIFF連携API対応）
       btnNoticeAgree.addEventListener('click', async () => {
         noticeModal.classList.add('hidden');
         const preSubmitBtn = document.getElementById('btn-pre-submit');
         preSubmitBtn.disabled = true;
         preSubmitBtn.textContent = '送信中...';
 
+        // バックエンドの BookingCreateLIFF スキーマに合わせたデータ定義
         const bookingData = {
-          user_id: userId,
+          access_token: accessToken || "", // LIFFアクセストークンを送信
           name: document.getElementById('user-name').value,
           gender: document.getElementById('user-gender').value,
           age: parseInt(document.getElementById('user-age').value, 10),
@@ -530,9 +536,13 @@
             body: JSON.stringify(bookingData)
           });
           
-          let resData = { booking_id: 'LOCAL-' + Math.random().toString(36).substring(2, 7).toUpperCase() };
+          let resData;
           if (response.ok) {
             resData = await response.json();
+          } else {
+            const errJson = await response.json();
+            alert(`予約エラー: ${errJson.detail || '予約に失敗しました。'}`);
+            return;
           }
 
           localStorage.setItem('active_ape_booking', JSON.stringify({
@@ -542,19 +552,6 @@
             area_2: bookingData.area_2,
             datetime_2: bookingData.datetime_2
           }));
-
-          if (typeof liff !== 'undefined' && liff.isLoggedIn && liff.isLoggedIn() && liff.isInClient()) {
-            try {
-              await liff.sendMessages([
-                {
-                  type: 'text',
-                  text: `【食事会マッチング仮予約】\n${bookingData.name} 様の仮予約を受け付けました。\n■ 予約ID: ${resData.booking_id}\n■ 第一希望: ${bookingData.area} / ${bookingData.datetime.replace('T', ' ')}\n\n診断結果をX(Twitter)でシェアして友達と一緒に参加しよう！`
-                }
-              ]);
-            } catch (msgErr) {
-              console.warn('LINEトークメッセージ送信エラー:', msgErr);
-            }
-          }
 
           alert(`【仮予約完了】\n${bookingData.name} 様、食事会マッチングへのご応募を受け付けました！\n（予約ID: ${resData.booking_id}）`);
 
@@ -567,8 +564,7 @@
 
         } catch (error) {
           console.error('予約処理エラー:', error);
-          alert('仮予約を受け付けました。');
-          bookingModal.classList.add('hidden');
+          alert('通信エラーが発生しました。時間をおいて再度お試しください。');
         } finally {
           preSubmitBtn.disabled = false;
           preSubmitBtn.innerHTML = '確認へ進む <i class="fa-solid fa-arrow-right ml-1"></i>';
