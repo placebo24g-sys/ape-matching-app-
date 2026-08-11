@@ -417,7 +417,7 @@ def create_ape_profile(profile: ApeProfileCreate, db: Session = Depends(get_db))
         user_id=profile.user_id,
         primary_type=profile.primary_type,
         score_chimpanzee=profile.score_chimpanzee,
-        score_bonobo:profile.score_bonobo if hasattr(profile, 'score_bonobo') else profile.score_bonobo,
+        score_bonobo=profile.score_bonobo,
         score_gorilla=profile.score_gorilla,
         score_orangutan=profile.score_orangutan,
         extraversion_score=profile.extraversion_score,
