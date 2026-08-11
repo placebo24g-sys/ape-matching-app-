@@ -297,6 +297,16 @@ class BookingCreate(BaseModel):
     extraversion_score: Optional[int] = 0
     achievement_score: Optional[int] = 0
 
+class ApeProfileCreate(BaseModel):
+    user_id: Optional[str] = None
+    primary_type: str
+    score_chimpanzee: Optional[int] = 0
+    score_bonobo: Optional[int] = 0
+    score_gorilla: Optional[int] = 0
+    score_orangutan: Optional[int] = 0
+    extraversion_score: Optional[int] = 0
+    achievement_score: Optional[int] = 0
+
 class CardRegisterRequest(BaseModel):
     user_id: str
     payment_method_id: str
@@ -397,7 +407,34 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
     
     return {"status": "success", "booking_id": booking_id, "message": "予約が保存されました"}
 
-# 3. Stripe カード登録 API
+# 3. 類人猿診断結果の保存 API
+@app.post("/api/ape-profiles", status_code=status.HTTP_201_CREATED)
+def create_ape_profile(profile: ApeProfileCreate, db: Session = Depends(get_db)):
+    profile_id = f"prof_{uuid.uuid4().hex[:8]}"
+    
+    new_profile = ApeProfileModel(
+        profile_id=profile_id,
+        user_id=profile.user_id,
+        primary_type=profile.primary_type,
+        score_chimpanzee=profile.score_chimpanzee,
+        score_bonobo:profile.score_bonobo if hasattr(profile, 'score_bonobo') else profile.score_bonobo,
+        score_gorilla=profile.score_gorilla,
+        score_orangutan=profile.score_orangutan,
+        extraversion_score=profile.extraversion_score,
+        achievement_score=profile.achievement_score
+    )
+    
+    try:
+        db.add(new_profile)
+        db.commit()
+        db.refresh(new_profile)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"診断プロフィールの保存に失敗しました: {str(e)}")
+        
+    return {"status": "success", "profile_id": profile_id, "message": "診断結果が保存されました"}
+
+# 4. Stripe カード登録 API
 @app.post("/api/users/register-card")
 def register_card(req: CardRegisterRequest, db: Session = Depends(get_db)):
     user = db.scalar(select(UserModel).where(UserModel.user_id == req.user_id))
@@ -438,7 +475,7 @@ def register_card(req: CardRegisterRequest, db: Session = Depends(get_db)):
         
     return {"status": "success", "card_fingerprint": card_fingerprint}
 
-# 4. 予約キャンセル API
+# 5. 予約キャンセル API
 @app.post("/api/bookings/{booking_id}/cancel")
 def cancel_booking(booking_id: str, req: CancelBookingRequest, db: Session = Depends(get_db)):
     user = db.scalar(select(UserModel).where(UserModel.user_id == req.user_id))
@@ -484,7 +521,7 @@ def cancel_booking(booking_id: str, req: CancelBookingRequest, db: Session = Dep
 
     return {"status": "cancelled", "fee": cancellation_fee, "message": f"キャンセル料 {cancellation_fee}円が発生しました"}
 
-# 5. 管理画面用：予約一覧取得 API
+# 6. 管理画面用：予約一覧取得 API
 @app.get("/api/bookings")
 def get_bookings(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
     stmt = select(BookingModel).order_by(BookingModel.created_at.desc())
@@ -511,7 +548,7 @@ def get_bookings(db: Session = Depends(get_db), _: bool = Depends(verify_admin))
         })
     return result
 
-# 6. 管理画面用：成立グループ一覧取得 API
+# 7. 管理画面用：成立グループ一覧取得 API
 @app.get("/api/matchings")
 def get_matchings(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
     stmt = select(BookingModel).where(
@@ -542,7 +579,7 @@ def get_matchings(db: Session = Depends(get_db), _: bool = Depends(verify_admin)
         })
     return result
 
-# 7. マッチング自動実行 API
+# 8. マッチング自動実行 API
 @app.post("/api/matchings/run")
 def run_matching(
     match_mode: str = "AUTO",
@@ -652,7 +689,7 @@ def run_matching(
         "message": f"{created_groups_count} 件のグループが作られ、{notified_users_count} 名にLINE通知が送信されました。"
     }
 
-# 8. 管理画面用：手動グループ割当 API 【追加】
+# 9. 管理画面用：手動グループ割当 API
 @app.post("/api/matchings/manual")
 def create_manual_matching(
     req: ManualMatchRequest,
@@ -694,7 +731,7 @@ def create_manual_matching(
         "member_count": len(bookings)
     }
 
-# 9. 管理画面用：グループ解散 API 【追加】
+# 10. 管理画面用：グループ解散 API
 @app.delete("/api/matchings/{group_id}")
 def cancel_matching_group(
     group_id: str,
@@ -722,7 +759,7 @@ def cancel_matching_group(
 
     return {"status": "success", "message": f"グループ [{group_id}] を解散し、メンバーを待機中に戻しました"}
 
-# 10. 管理画面用：ブラックリスト一覧取得 API
+# 11. 管理画面用：ブラックリスト一覧取得 API
 @app.get("/api/admin/blacklist")
 @app.get("/api/admin/blacklists")
 def get_blacklists(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
@@ -742,7 +779,7 @@ def get_blacklists(db: Session = Depends(get_db), _: bool = Depends(verify_admin
         })
     return result
 
-# 11. 管理画面用：ブラックリスト手動登録 API
+# 12. 管理画面用：ブラックリスト手動登録 API
 @app.post("/api/admin/blacklist", status_code=status.HTTP_201_CREATED)
 @app.post("/api/admin/blacklists", status_code=status.HTTP_201_CREATED)
 def add_to_blacklist(req: BlacklistCreateRequest, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
@@ -772,11 +809,10 @@ def add_to_blacklist(req: BlacklistCreateRequest, db: Session = Depends(get_db),
 
     return {"status": "success", "id": new_entry.id, "message": "ブラックリストに追加しました"}
 
-# 12. 管理画面用：ブラックリスト解除（削除） API
+# 13. 管理画面用：ブラックリスト解除（削除） API
 @app.delete("/api/admin/blacklist/{user_or_id}")
 @app.delete("/api/admin/blacklists/{user_or_id}")
 def remove_from_blacklist(user_or_id: str, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
-    # ID(数値) または user_id(文字列) の両方で検索可能に対応
     if user_or_id.isdigit():
         stmt = select(BlacklistModel).where(or_(BlacklistModel.id == int(user_or_id), BlacklistModel.user_id == user_or_id))
     else:
