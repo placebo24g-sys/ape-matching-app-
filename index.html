@@ -266,7 +266,6 @@
       let userId = localStorage.getItem('ape_user_id');
       let lineDisplayName = '';
 
-      // --- LIFF SDK 安全な初期化 ---
       if (typeof liff !== 'undefined' && !window.liffLoadError) {
         try {
           await liff.init({ liffId: LIFF_ID });
@@ -282,10 +281,8 @@
             }
           }
         } catch (err) {
-          console.warn('LIFF初期化スキップ（ブラウザ直接アクセス等）:', err);
+          console.warn('LIFF初期化スキップ:', err);
         }
-      } else {
-        console.warn('LINE SDKの読み込みに失敗したか環境外のため、Webモードで動作します。');
       }
 
       if (!userId) {
@@ -405,7 +402,6 @@
       btnNext.addEventListener('click', goToNextQuestion);
       btnRestart.addEventListener('click', restartQuiz);
 
-      // --- LINE 友達宛て共有 ---
       if (btnShareLine) {
         btnShareLine.addEventListener('click', async () => {
           if (typeof liff === 'undefined' || window.liffLoadError) {
@@ -427,9 +423,7 @@
                   text: `【類人猿タイプ診断】\n私の診断結果は【${typeInfo.name}】（${typeInfo.catchphrase}）でした！\n\n診断はこちらから試してみてね👇\n${window.location.href}`
                 }
               ]);
-              if (res) {
-                alert('LINEの友達に共有しました！');
-              }
+              if (res) alert('LINEの友達に共有しました！');
             } catch (error) {
               console.error('TargetPicker送信エラー:', error);
             }
@@ -691,7 +685,7 @@
         latestResult = calculateScores();
         const mainTypeInfo = typeMaster[latestResult.primaryType];
 
-        document.getElementById('result-header').className = `p-8 text-center text-white ${mainTypeInfo.headerBg}`;
+        document.getElementById('result-header').className = `p-8 text-center text-white transition-colors ${mainTypeInfo.headerBg}`;
         document.getElementById('result-type-name').textContent = mainTypeInfo.name;
         document.getElementById('result-catchphrase').textContent = mainTypeInfo.catchphrase;
         document.getElementById('result-description').textContent = mainTypeInfo.description;
