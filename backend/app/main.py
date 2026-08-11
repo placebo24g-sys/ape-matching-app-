@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 import uuid
 
+import requests
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from linebot.v3.messaging import (
@@ -32,10 +33,14 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sess
 import stripe
 
 # ==========================================
-# 0. 外部サービス初期化 (Stripe)
+# 0. 外部サービス・環境変数設定
 # ==========================================
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "sk_test_xxx")
 stripe.api_key = STRIPE_SECRET_KEY
+
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+LINE_CHANNEL_ID = os.getenv("LINE_CHANNEL_ID")  # LIFF ID Token検証用 (オプション)
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ape_secret_pass_2026")
 
 # ==========================================
 # 1. データベース設定 & モデル定義
@@ -53,16 +58,14 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 class Base(DeclarativeBase):
     pass
 
-# --- 親モデル ---
-
 class UserModel(Base):
     __tablename__ = "users"
 
-    user_id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(String, primary_key=True)  # LINEのuserId
     name: Mapped[str] = mapped_column(String)
     email: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True, index=True)
     phone_number: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True)
-    gender: Mapped[str] = mapped_column(String, default="other")  # 'female', 'male', 'other'
+    gender: Mapped[str] = mapped_column(String, default="other")
     is_blacklisted: Mapped[bool] = mapped_column(Boolean, default=False)
     is_warning: Mapped[bool] = mapped_column(Boolean, default=False)
     has_canceled_first_free: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -88,7 +91,7 @@ class BookingModel(Base):
     extraversion_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     achievement_score: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     
-    status: Mapped[str] = mapped_column(String, default="pending")  # 'pending', 'matched', 'cancelled'
+    status: Mapped[str] = mapped_column(String, default="pending")
     group_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
@@ -116,8 +119,6 @@ class BlacklistModel(Base):
     ip_address: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     reason: Mapped[Optional[str]] = mapped_column(String, default="規約違反・自動判定")
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
-
-# --- 子モデル ---
 
 class UserCardFingerprintModel(Base):
     __tablename__ = "user_card_fingerprints"
@@ -147,9 +148,23 @@ def get_db():
         db.close()
 
 # ==========================================
-# 2. LINE 通知処理
+# 2. LIFF / LINE トークン検証機能
 # ==========================================
-LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+def verify_liff_token(access_token: str) -> dict:
+    """
+    LIFF(liff.getAccessToken())で取得したアクセストークンをLINE公式APIで検証し、
+    LINEのuserId等のプロフィール情報を返却する関数
+    """
+    url = "https://api.line.me/v2/profile"
+    headers = {"Authorization": f"Bearer {access_token}"}
+    resp = requests.get(url, headers=headers, timeout=5)
+    
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="無効なLINEアクセストークンです。"
+        )
+    return resp.json()  # {"userId": "...", "displayName": "...", "pictureUrl": "..."}
 
 def send_line_notification(to_user_id: str, message_text: str) -> bool:
     if not LINE_CHANNEL_ACCESS_TOKEN:
@@ -170,7 +185,7 @@ def send_line_notification(to_user_id: str, message_text: str) -> bool:
         return False
 
 # ==========================================
-# 3. マッチングコアスコアリング機能（ハイブリッド化）
+# 3. マッチングコアスコアリング機能
 # ==========================================
 def is_specialist(user: BookingModel) -> bool:
     e_score = user.extraversion_score or 0
@@ -268,7 +283,7 @@ def has_met_before(db: Session, candidate_users: List[BookingModel]) -> bool:
 # ==========================================
 # 4. FastAPI アプリケーション定義
 # ==========================================
-app = FastAPI(title="類人猿マッチング API")
+app = FastAPI(title="類人猿マッチング API (LIFF対応)")
 
 app.add_middleware(
     CORSMiddleware,
@@ -279,11 +294,12 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ape_secret_pass_2026")
+# --- スキーマ定義 ---
+class LiffAuthRequest(BaseModel):
+    access_token: str
 
-# --- リクエスト/レスポンススキーマ ---
-class BookingCreate(BaseModel):
-    user_id: str
+class BookingCreateLIFF(BaseModel):
+    access_token: str  # LIFFから渡されるアクセストークン
     name: str
     gender: str
     age: Optional[int] = None
@@ -324,7 +340,6 @@ class BlacklistCreateRequest(BaseModel):
 class ManualMatchRequest(BaseModel):
     booking_ids: List[str]
 
-# --- 認証チェック補助関数 ---
 def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
     if x_admin_password != ADMIN_PASSWORD:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="パスワードが正しくありません")
@@ -334,56 +349,91 @@ def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-P
 # 5. API エンドポイント
 # ==========================================
 
-# 1. ルートヘルスチェック
 @app.get("/")
 def read_root():
-    return {"status": "ok", "service": "APE Matching API"}
+    return {"status": "ok", "service": "APE Matching API with LIFF Support"}
 
-# 2. 予約作成 API (ブラックリスト判定処理含む)
-@app.post("/api/bookings", status_code=status.HTTP_201_CREATED)
-def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
-    conditions = [BlacklistModel.user_id == booking.user_id]
+# ------------------------------------------
+# A. LIFF認証・ユーザー情報取得 API
+# ------------------------------------------
+@app.post("/api/auth/liff")
+def authenticate_liff_user(req: LiffAuthRequest, db: Session = Depends(get_db)):
+    """
+    LIFFで取得した access_token を検証し、DB内のユーザー情報を返す
+    """
+    line_user = verify_liff_token(req.access_token)
+    user_id = line_user.get("userId")
+
+    user = db.scalar(select(UserModel).where(UserModel.user_id == user_id))
+    
+    if user:
+        if user.is_blacklisted:
+            raise HTTPException(status_code=403, detail="このアカウントは利用が制限されています。")
+        return {
+            "status": "success",
+            "is_registered": True,
+            "user": {
+                "user_id": user.user_id,
+                "name": user.name,
+                "gender": user.gender,
+                "email": user.email,
+                "phone_number": user.phone_number
+            }
+        }
+    else:
+        return {
+            "status": "success",
+            "is_registered": False,
+            "line_profile": {
+                "user_id": user_id,
+                "display_name": line_user.get("displayName")
+            }
+        }
+
+# ------------------------------------------
+# B. LIFF経由の予約作成 API
+# ------------------------------------------
+@app.post("/api/bookings/liff", status_code=status.HTTP_201_CREATED)
+def create_booking_via_liff(booking: BookingCreateLIFF, db: Session = Depends(get_db)):
+    # 1. LIFF トークンから LINE user_id を安全に取得
+    line_user = verify_liff_token(booking.access_token)
+    user_id = line_user.get("userId")
+
+    # 2. ブラックリストチェック
+    conditions = [BlacklistModel.user_id == user_id]
     if booking.email:
         conditions.append(BlacklistModel.email == booking.email)
     if booking.phone_number:
         conditions.append(BlacklistModel.phone_number == booking.phone_number)
 
-    blacklisted_entry = db.scalar(
-        select(BlacklistModel).where(or_(*conditions))
-    )
+    blacklisted_entry = db.scalar(select(BlacklistModel).where(or_(*conditions)))
     if blacklisted_entry:
-        raise HTTPException(
-            status_code=403, 
-            detail="現在、このアカウントからのご予約・操作は受け付けることができません。"
-        )
+        raise HTTPException(status_code=403, detail="現在、このアカウントからのご予約・操作は受け付けることができません。")
 
-    user = db.scalar(select(UserModel).where(UserModel.user_id == booking.user_id))
+    # 3. ユーザーデータの作成または更新
+    user = db.scalar(select(UserModel).where(UserModel.user_id == user_id))
     if user:
         if user.is_blacklisted:
-            raise HTTPException(
-                status_code=403, 
-                detail="現在、このアカウントからのご予約・操作は受け付けることができません。"
-            )
+            raise HTTPException(status_code=403, detail="現在、このアカウントからのご予約・操作は受け付けることができません。")
+        user.name = booking.name
+        user.gender = booking.gender
+        if booking.email: user.email = booking.email
+        if booking.phone_number: user.phone_number = booking.phone_number
     else:
-        new_user = UserModel(
-            user_id=booking.user_id,
+        user = UserModel(
+            user_id=user_id,
             name=booking.name,
             gender=booking.gender,
             email=booking.email,
             phone_number=booking.phone_number
         )
-        db.add(new_user)
-        try:
-            db.commit()
-        except Exception as e:
-            db.rollback()
-            raise HTTPException(status_code=500, detail=f"ユーザー初期作成に失敗しました: {str(e)}")
+        db.add(user)
 
+    # 4. 予約レコード作成
     booking_id = f"bk_{uuid.uuid4().hex[:8]}"
-    
     new_booking = BookingModel(
         booking_id=booking_id,
-        user_id=booking.user_id,
+        user_id=user_id,
         name=booking.name,
         gender=booking.gender,
         age=booking.age,
@@ -396,22 +446,27 @@ def create_booking(booking: BookingCreate, db: Session = Depends(get_db)):
         achievement_score=booking.achievement_score,
         status="pending"
     )
-    
+
     try:
         db.add(new_booking)
         db.commit()
         db.refresh(new_booking)
     except Exception as e:
         db.rollback()
-        raise HTTPException(status_code=500, detail=f"予約データ保存に失敗しました: {str(e)}")
-    
-    return {"status": "success", "booking_id": booking_id, "message": "予約が保存されました"}
+        raise HTTPException(status_code=500, detail=f"予約処理に失敗しました: {str(e)}")
 
-# 3. 類人猿診断結果の保存 API
+    # 5. LINEで予約完了のPush通知を送信
+    msg = f"【予約受付完了】\n{booking.name} 様\n\nご予約を受け付けました。\n■ エリア: {booking.area}\n■ 希望日時: {booking.datetime.replace('T', ' ')}\n\nマッチングが完了次第、こちらに通知いたします。"
+    send_line_notification(user_id, msg)
+
+    return {"status": "success", "booking_id": booking_id, "user_id": user_id, "message": "予約が完了しました"}
+
+# ------------------------------------------
+# C. 既存の各種API (診断・カード・キャンセル・管理機能)
+# ------------------------------------------
 @app.post("/api/ape-profiles", status_code=status.HTTP_201_CREATED)
 def create_ape_profile(profile: ApeProfileCreate, db: Session = Depends(get_db)):
     profile_id = f"prof_{uuid.uuid4().hex[:8]}"
-    
     new_profile = ApeProfileModel(
         profile_id=profile_id,
         user_id=profile.user_id,
@@ -423,18 +478,15 @@ def create_ape_profile(profile: ApeProfileCreate, db: Session = Depends(get_db))
         extraversion_score=profile.extraversion_score,
         achievement_score=profile.achievement_score
     )
-    
     try:
         db.add(new_profile)
         db.commit()
-        db.refresh(new_profile)
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"診断プロフィールの保存に失敗しました: {str(e)}")
         
-    return {"status": "success", "profile_id": profile_id, "message": "診断結果が保存されました"}
+    return {"status": "success", "profile_id": profile_id}
 
-# 4. Stripe カード登録 API
 @app.post("/api/users/register-card")
 def register_card(req: CardRegisterRequest, db: Session = Depends(get_db)):
     user = db.scalar(select(UserModel).where(UserModel.user_id == req.user_id))
@@ -475,7 +527,6 @@ def register_card(req: CardRegisterRequest, db: Session = Depends(get_db)):
         
     return {"status": "success", "card_fingerprint": card_fingerprint}
 
-# 5. 予約キャンセル API
 @app.post("/api/bookings/{booking_id}/cancel")
 def cancel_booking(booking_id: str, req: CancelBookingRequest, db: Session = Depends(get_db)):
     user = db.scalar(select(UserModel).where(UserModel.user_id == req.user_id))
@@ -521,323 +572,133 @@ def cancel_booking(booking_id: str, req: CancelBookingRequest, db: Session = Dep
 
     return {"status": "cancelled", "fee": cancellation_fee, "message": f"キャンセル料 {cancellation_fee}円が発生しました"}
 
-# 6. 管理画面用：予約一覧取得 API
+# --- 管理画面用 API ---
 @app.get("/api/bookings")
 def get_bookings(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
-    stmt = select(BookingModel).order_by(BookingModel.created_at.desc())
-    bookings = db.scalars(stmt).all()
-    
-    result = []
-    for b in bookings:
-        result.append({
-            "booking_id": b.booking_id,
-            "user_id": b.user_id,
-            "name": b.name,
-            "gender": b.gender,
-            "age": b.age,
-            "area": b.area,
-            "datetime": b.preferred_datetime,
-            "area_2": b.area_2,
-            "datetime_2": b.datetime_2,
-            "primary_type": b.primary_type,
-            "extraversion_score": b.extraversion_score,
-            "achievement_score": b.achievement_score,
-            "status": b.status,
-            "group_id": b.group_id,
-            "created_at": b.created_at.strftime("%Y-%m-%d %H:%M") if b.created_at else None
-        })
-    return result
+    bookings = db.scalars(select(BookingModel).order_by(BookingModel.created_at.desc())).all()
+    return [{
+        "booking_id": b.booking_id, "user_id": b.user_id, "name": b.name,
+        "gender": b.gender, "age": b.age, "area": b.area, "datetime": b.preferred_datetime,
+        "area_2": b.area_2, "datetime_2": b.datetime_2, "primary_type": b.primary_type,
+        "status": b.status, "group_id": b.group_id,
+        "created_at": b.created_at.strftime("%Y-%m-%d %H:%M") if b.created_at else None
+    } for b in bookings]
 
-# 7. 管理画面用：成立グループ一覧取得 API
 @app.get("/api/matchings")
 def get_matchings(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
-    stmt = select(BookingModel).where(
-        BookingModel.status == "matched",
-        BookingModel.group_id.isnot(None)
-    )
-    matched_bookings = db.scalars(stmt).all()
-
+    matched_bookings = db.scalars(select(BookingModel).where(
+        BookingModel.status == "matched", BookingModel.group_id.isnot(None)
+    )).all()
+    
     groups_dict = defaultdict(list)
     for b in matched_bookings:
         if b.group_id:
             groups_dict[b.group_id].append({
-                "booking_id": b.booking_id,
-                "user_id": b.user_id,
-                "name": b.name,
-                "gender": b.gender,
-                "age": b.age,
-                "area": b.area,
-                "datetime": b.preferred_datetime,
+                "booking_id": b.booking_id, "user_id": b.user_id, "name": b.name,
+                "gender": b.gender, "age": b.age, "area": b.area, "datetime": b.preferred_datetime,
                 "primary_type": b.primary_type
             })
+    return [{"group_id": g_id, "members": members} for g_id, members in groups_dict.items()]
 
-    result = []
-    for group_id, members in groups_dict.items():
-        result.append({
-            "group_id": group_id,
-            "members": members
-        })
-    return result
-
-# 8. マッチング自動実行 API
 @app.post("/api/matchings/run")
-def run_matching(
-    match_mode: str = "AUTO",
-    _: bool = Depends(verify_admin),
-    db: Session = Depends(get_db)
-):
-    stmt = select(BookingModel).where(BookingModel.status == "pending")
-    pending_users = db.scalars(stmt).all()
-
+def run_matching(match_mode: str = "AUTO", _: bool = Depends(verify_admin), db: Session = Depends(get_db)):
+    pending_users = db.scalars(select(BookingModel).where(BookingModel.status == "pending")).all()
     if not pending_users:
-        return {"status": "success", "created_groups": 0, "message": "マッチング対象の未処理予約はありません"}
+        return {"status": "success", "created_groups": 0, "message": "対象予約がありません"}
 
-    created_groups_count = 0
-    notified_users_count = 0
+    created_groups_count, notified_users_count = 0, 0
     used_booking_ids = set()
 
     def process_slots(users_list: List[BookingModel], is_second_choice: bool = False):
         nonlocal created_groups_count, notified_users_count, used_booking_ids
-        
         slots = defaultdict(list)
         for u in users_list:
-            if u.booking_id in used_booking_ids or u.status != "pending":
-                continue
-            
+            if u.booking_id in used_booking_ids or u.status != "pending": continue
             target_area = u.area_2 if is_second_choice else u.area
             target_dt = u.datetime_2 if is_second_choice else u.preferred_datetime
+            if not target_area or not target_dt: continue
             
-            if not target_area or not target_dt:
-                continue
-                
             raw_dt = target_dt.replace('T', ' ')
-            dt_hour = raw_dt[:13] if len(raw_dt) >= 13 else raw_dt
-            slots[(target_area, dt_hour)].append(u)
+            slots[(target_area, raw_dt[:13] if len(raw_dt) >= 13 else raw_dt)].append(u)
 
         for (area, dt_hour), pool in slots.items():
             active_pool = [u for u in pool if u.booking_id not in used_booking_ids and u.status == "pending"]
-            males = [u for u in active_pool if u.gender == "male"]
-            females = [u for u in active_pool if u.gender == "female"]
-
-            if len(males) < 2 or len(females) < 2:
-                continue
-
-            male_pairs = list(itertools.combinations(males, 2))
-            female_pairs = list(itertools.combinations(females, 2))
+            males, females = [u for u in active_pool if u.gender == "male"], [u for u in active_pool if u.gender == "female"]
+            if len(males) < 2 or len(females) < 2: continue
 
             possible_groups = []
-            for m_pair in male_pairs:
-                for f_pair in female_pairs:
+            for m_pair in itertools.combinations(males, 2):
+                for f_pair in itertools.combinations(females, 2):
                     candidate = list(m_pair) + list(f_pair)
-                    
-                    if has_met_before(db, candidate):
-                        continue
-
-                    score, matched_type_label = calculate_hybrid_score(candidate, mode=match_mode)
-                    
+                    if has_met_before(db, candidate): continue
+                    score, label = calculate_hybrid_score(candidate, mode=match_mode)
                     if score > 0:
-                        possible_groups.append({
-                            "score": score,
-                            "matched_type_label": matched_type_label,
-                            "members": candidate,
-                            "b_ids": [m.booking_id for m in candidate]
-                        })
+                        possible_groups.append({"score": score, "label": label, "members": candidate, "b_ids": [m.booking_id for m in candidate]})
 
-            possible_groups.sort(key=lambda x: x["score"], reverse=True)
-
+            possible_groups.sort(key=x: x["score"], reverse=True)
             for g in possible_groups:
-                if any(b_id in used_booking_ids for b_id in g["b_ids"]):
-                    continue
-
+                if any(b_id in used_booking_ids for b_id in g["b_ids"]): continue
                 group_id = f"grp_{uuid.uuid4().hex[:8]}"
-                for member in g["members"]:
-                    member.status = "matched"
-                    member.group_id = group_id
-                    used_booking_ids.add(member.booking_id)
+                for m in g["members"]:
+                    m.status, m.group_id = "matched", group_id
+                    used_booking_ids.add(m.booking_id)
+                db.commit()
+                created_groups_count += 1
 
-                try:
-                    db.commit()
-                    created_groups_count += 1
-                except Exception as e:
-                    db.rollback()
-                    continue
-
-                for member in g["members"]:
-                    msg = (
-                        f"🎉 【マッチング成立のお知らせ】\n\n"
-                        f"{member.name} 様\n\n"
-                        f"お食事会のマッチングが成立しました✨\n\n"
-                        f"■ 日時: {dt_hour}:00 頃\n"
-                        f"■ エリア: {area}\n"
-                        f"■ マッチングタイプ: {g['matched_type_label']}\n"
-                        f"■ グループID: {group_id}\n\n"
-                        f"当日の店舗案内は追ってご連絡いたします。"
-                    )
-                    if send_line_notification(member.user_id, msg):
-                        notified_users_count += 1
+                for m in g["members"]:
+                    msg = f"🎉 【マッチング成立のお知らせ】\n\n{m.name} 様\nお食事会のマッチングが成立しました！\n■ 日時: {dt_hour}:00 頃\n■ エリア: {area}\n■ グループID: {group_id}"
+                    if send_line_notification(m.user_id, msg): notified_users_count += 1
 
     process_slots(pending_users, is_second_choice=False)
-
     remaining_users = db.scalars(select(BookingModel).where(BookingModel.status == "pending")).all()
-    if remaining_users:
-        process_slots(remaining_users, is_second_choice=True)
+    if remaining_users: process_slots(remaining_users, is_second_choice=True)
 
-    return {
-        "status": "success",
-        "created_groups": created_groups_count,
-        "notified_users": notified_users_count,
-        "message": f"{created_groups_count} 件のグループが作られ、{notified_users_count} 名にLINE通知が送信されました。"
-    }
+    return {"status": "success", "created_groups": created_groups_count, "notified_users": notified_users_count}
 
-# 9. 管理画面用：手動グループ割当 API
 @app.post("/api/matchings/manual")
-def create_manual_matching(
-    req: ManualMatchRequest,
-    db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin)
-):
-    if len(req.booking_ids) < 2:
-        raise HTTPException(
-            status_code=400,
-            detail="グループ作成には最低2名のユーザー選択が必要です"
-        )
-
-    stmt = select(BookingModel).where(
-        or_(
-            BookingModel.booking_id.in_(req.booking_ids),
-            BookingModel.user_id.in_(req.booking_ids)
-        )
-    )
-    bookings = db.scalars(stmt).all()
-
-    if not bookings:
-        raise HTTPException(status_code=404, detail="対象の予約データが見つかりません")
-
+def create_manual_matching(req: ManualMatchRequest, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    bookings = db.scalars(select(BookingModel).where(or_(BookingModel.booking_id.in_(req.booking_ids), BookingModel.user_id.in_(req.booking_ids)))).all()
+    if not bookings: raise HTTPException(status_code=404, detail="対象が見つかりません")
     new_group_id = f"grp_{uuid.uuid4().hex[:8]}"
-    for booking in bookings:
-        booking.status = "matched"
-        booking.group_id = new_group_id
+    for b in bookings: b.status, b.group_id = "matched", new_group_id
+    db.commit()
+    return {"status": "success", "group_id": new_group_id}
 
-    try:
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"手動割り当てに失敗しました: {str(e)}")
-
-    return {
-        "status": "success",
-        "message": "手動グループ割当が完了しました",
-        "group_id": new_group_id,
-        "member_count": len(bookings)
-    }
-
-# 10. 管理画面用：グループ解散 API
 @app.delete("/api/matchings/{group_id}")
-def cancel_matching_group(
-    group_id: str,
-    db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin)
-):
-    stmt = select(BookingModel).where(BookingModel.group_id == group_id)
-    bookings = db.scalars(stmt).all()
+def cancel_matching_group(group_id: str, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    bookings = db.scalars(select(BookingModel).where(BookingModel.group_id == group_id)).all()
+    if not bookings: raise HTTPException(status_code=404, detail="グループが見つかりません")
+    for b in bookings: b.status, b.group_id = "pending", None
+    db.commit()
+    return {"status": "success", "message": "グループを解散しました"}
 
-    if not bookings:
-        raise HTTPException(
-            status_code=404,
-            detail="指定されたグループが存在しないか、すでに解散されています"
-        )
-
-    for booking in bookings:
-        booking.status = "pending"
-        booking.group_id = None
-
-    try:
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"グループ解散処理に失敗しました: {str(e)}")
-
-    return {"status": "success", "message": f"グループ [{group_id}] を解散し、メンバーを待機中に戻しました"}
-
-# 11. 管理画面用：ブラックリスト一覧取得 API
-@app.get("/api/admin/blacklist")
 @app.get("/api/admin/blacklists")
 def get_blacklists(db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
-    stmt = select(BlacklistModel).order_by(BlacklistModel.created_at.desc())
-    blacklists = db.scalars(stmt).all()
-    
-    result = []
-    for item in blacklists:
-        result.append({
-            "id": item.id,
-            "user_id": item.user_id,
-            "email": item.email,
-            "phone_number": item.phone_number,
-            "ip_address": item.ip_address,
-            "reason": item.reason,
-            "created_at": item.created_at.strftime("%Y-%m-%d %H:%M") if item.created_at else None
-        })
-    return result
+    items = db.scalars(select(BlacklistModel).order_by(BlacklistModel.created_at.desc())).all()
+    return [{"id": i.id, "user_id": i.user_id, "email": i.email, "phone_number": i.phone_number, "reason": i.reason} for i in items]
 
-# 12. 管理画面用：ブラックリスト手動登録 API
-@app.post("/api/admin/blacklist", status_code=status.HTTP_201_CREATED)
 @app.post("/api/admin/blacklists", status_code=status.HTTP_201_CREATED)
 def add_to_blacklist(req: BlacklistCreateRequest, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
-    if not any([req.user_id, req.email, req.phone_number, req.ip_address]):
-        raise HTTPException(status_code=400, detail="user_id, email, phone_number, ip_address のいずれか1つ以上は必須です")
-
-    new_entry = BlacklistModel(
-        user_id=req.user_id,
-        email=req.email,
-        phone_number=req.phone_number,
-        ip_address=req.ip_address,
-        reason=req.reason
-    )
-    
+    entry = BlacklistModel(user_id=req.user_id, email=req.email, phone_number=req.phone_number, ip_address=req.ip_address, reason=req.reason)
     if req.user_id:
-        user = db.scalar(select(UserModel).where(UserModel.user_id == req.user_id))
-        if user:
-            user.is_blacklisted = True
+        u = db.scalar(select(UserModel).where(UserModel.user_id == req.user_id))
+        if u: u.is_blacklisted = True
+    db.add(entry)
+    db.commit()
+    return {"status": "success", "id": entry.id}
 
-    try:
-        db.add(new_entry)
-        db.commit()
-        db.refresh(new_entry)
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"ブラックリスト登録に失敗しました: {str(e)}")
-
-    return {"status": "success", "id": new_entry.id, "message": "ブラックリストに追加しました"}
-
-# 13. 管理画面用：ブラックリスト解除（削除） API
-@app.delete("/api/admin/blacklist/{user_or_id}")
 @app.delete("/api/admin/blacklists/{user_or_id}")
 def remove_from_blacklist(user_or_id: str, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
-    if user_or_id.isdigit():
-        stmt = select(BlacklistModel).where(or_(BlacklistModel.id == int(user_or_id), BlacklistModel.user_id == user_or_id))
-    else:
-        stmt = select(BlacklistModel).where(BlacklistModel.user_id == user_or_id)
-
+    stmt = select(BlacklistModel).where(or_(BlacklistModel.id == int(user_or_id), BlacklistModel.user_id == user_or_id)) if user_or_id.isdigit() else select(BlacklistModel).where(BlacklistModel.user_id == user_or_id)
     entry = db.scalar(stmt)
-    if not entry:
-        raise HTTPException(status_code=404, detail="該当のブラックリストデータが見つかりません")
-
+    if not entry: raise HTTPException(status_code=404, detail="データが見つかりません")
     if entry.user_id:
-        user = db.scalar(select(UserModel).where(UserModel.user_id == entry.user_id))
-        if user:
-            user.is_blacklisted = False
+        u = db.scalar(select(UserModel).where(UserModel.user_id == entry.user_id))
+        if u: u.is_blacklisted = False
+    db.delete(entry)
+    db.commit()
+    return {"status": "success"}
 
-    try:
-        db.delete(entry)
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=f"ブラックリスト解除に失敗しました: {str(e)}")
-
-    return {"status": "success", "message": "ブラックリストから削除（解除）しました"}
-
-# Local 実行用エントリーポイント
 if __name__ == "__main__":
     import uvicorn
-    port = int(os.getenv("PORT", 8000))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
