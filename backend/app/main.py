@@ -42,17 +42,30 @@ LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_ID = os.getenv("LINE_CHANNEL_ID")  # LIFF ID Token検証用 (オプション)
 ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "ape_secret_pass_2026")
 
+# AI予約サーバー連携用設定
+AI_BOOKING_WEBHOOK_URL = os.getenv("AI_BOOKING_WEBHOOK_URL", "")  # 連携先AI予約サーバーのURL
+AI_BOOKING_API_KEY = os.getenv("AI_BOOKING_API_KEY", "")          # 連携用APIキー
+
 # ==========================================
-# 1. データベース設定 & モデル定義
+# 1. データベース設定 (Supabase / PostgreSQL対応)
 # ==========================================
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./ape_app.db")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-engine = create_engine(
-    DATABASE_URL,
-    connect_args={"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-)
+# Supabase等PostgreSQL接続時にコネクションプールを最適化
+engine_args = {}
+if DATABASE_URL.startswith("postgresql"):
+    engine_args = {
+        "pool_pre_ping": True,
+        "pool_recycle": 300,
+    }
+else:
+    engine_args = {
+        "connect_args": {"check_same_thread": False}
+    }
+
+engine = create_engine(DATABASE_URL, **engine_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 class Base(DeclarativeBase):
@@ -148,7 +161,7 @@ def get_db():
         db.close()
 
 # ==========================================
-# 2. LIFF / LINE トークン検証機能
+# 2. 外部通知・連携機能 (LINE / AI予約Webhook)
 # ==========================================
 def verify_liff_token(access_token: str) -> dict:
     url = "https://api.line.me/v2/profile"
@@ -179,6 +192,19 @@ def send_line_notification(to_user_id: str, message_text: str) -> bool:
     except Exception as e:
         print(f"[LINE Error] 送信失敗 ({to_user_id}): {e}")
         return False
+
+def notify_ai_booking_server(booking_data: dict):
+    """新規予約発生時にAI予約サーバーへWebhookを非同期または同期送信する"""
+    if not AI_BOOKING_WEBHOOK_URL:
+        return
+    try:
+        headers = {"Content-Type": "application/json"}
+        if AI_BOOKING_API_KEY:
+            headers["Authorization"] = f"Bearer {AI_BOOKING_API_KEY}"
+        
+        requests.post(AI_BOOKING_WEBHOOK_URL, json=booking_data, headers=headers, timeout=5)
+    except Exception as e:
+        print(f"[Webhook Error] AI予約サーバーへの送信に失敗しました: {e}")
 
 # ==========================================
 # 3. マッチングコアスコアリング機能
@@ -279,7 +305,7 @@ def has_met_before(db: Session, candidate_users: List[BookingModel]) -> bool:
 # ==========================================
 # 4. FastAPI アプリケーション定義
 # ==========================================
-app = FastAPI(title="類人猿マッチング API (LIFF対応)")
+app = FastAPI(title="類人猿マッチング API (Supabase & AI予約連携対応)")
 
 app.add_middleware(
     CORSMiddleware,
@@ -335,6 +361,14 @@ class BlacklistCreateRequest(BaseModel):
 class ManualMatchRequest(BaseModel):
     booking_ids: List[str]
 
+# AI予約サーバーからのWebhook受信用スキーマ
+class AIWebhookReceiveRequest(BaseModel):
+    event_type: str  # 例: "ai_booking_status_update" など
+    booking_id: str
+    status: Optional[str] = None
+    group_id: Optional[str] = None
+    message: Optional[str] = None
+
 def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
     if x_admin_password != ADMIN_PASSWORD:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="パスワードが正しくありません")
@@ -346,7 +380,7 @@ def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-P
 
 @app.get("/")
 def read_root():
-    return {"status": "ok", "service": "APE Matching API with LIFF Support"}
+    return {"status": "ok", "service": "APE Matching API with Supabase & AI Webhook"}
 
 @app.post("/api/auth/liff")
 def authenticate_liff_user(req: LiffAuthRequest, db: Session = Depends(get_db)):
@@ -437,10 +471,46 @@ def create_booking_via_liff(booking: BookingCreateLIFF, db: Session = Depends(ge
         db.rollback()
         raise HTTPException(status_code=500, detail=f"予約処理に失敗しました: {str(e)}")
 
+    # ユーザーへLINE通知
     msg = f"【予約受付完了】\n{booking.name} 様\n\nご予約を受け付けました。\n■ エリア: {booking.area}\n■ 希望日時: {booking.datetime.replace('T', ' ')}\n\nマッチングが完了次第、こちらに通知いたします。"
     send_line_notification(user_id, msg)
 
+    # 外部のAI予約サーバーへWebhook送信
+    notify_ai_booking_server({
+        "event_type": "new_booking",
+        "booking_id": booking_id,
+        "user_id": user_id,
+        "name": booking.name,
+        "gender": booking.gender,
+        "area": booking.area,
+        "preferred_datetime": booking.datetime
+    })
+
     return {"status": "success", "booking_id": booking_id, "user_id": user_id, "message": "予約が完了しました"}
+
+@app.post("/api/ai/webhook")
+def receive_ai_webhook(payload: AIWebhookReceiveRequest, db: Session = Depends(get_db)):
+    """AI予約サーバー側からの結果（ステータス変更や自動手配結果）を受信するエンドポイント"""
+    booking = db.scalar(select(BookingModel).where(BookingModel.booking_id == payload.booking_id))
+    if not booking:
+        raise HTTPException(status_code=404, detail="対象の予約が見つかりません")
+
+    if payload.status:
+        booking.status = payload.status
+    if payload.group_id:
+        booking.group_id = payload.group_id
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"DB更新エラー: {str(e)}")
+
+    # メッセージがあればユーザーにLINE通知を送る
+    if payload.message and booking.user_id:
+        send_line_notification(booking.user_id, payload.message)
+
+    return {"status": "success", "booking_id": payload.booking_id, "updated_status": booking.status}
 
 @app.post("/api/ape-profiles", status_code=status.HTTP_201_CREATED)
 def create_ape_profile(profile: ApeProfileCreate, db: Session = Depends(get_db)):
@@ -612,7 +682,7 @@ def run_matching(match_mode: str = "AUTO", _: bool = Depends(verify_admin), db: 
                     if score > 0:
                         possible_groups.append({"score": score, "label": label, "members": candidate, "b_ids": [m.booking_id for m in candidate]})
 
-            # 修正箇所: lambdaを追加
+            # lambdaを追加して修正済みのソート処理
             possible_groups.sort(key=lambda x: x["score"], reverse=True)
             
             for g in possible_groups:
