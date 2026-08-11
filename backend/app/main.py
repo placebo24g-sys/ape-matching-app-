@@ -104,6 +104,13 @@ class BookingModel(Base):
     
     status: Mapped[str] = mapped_column(String, default="pending")
     group_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    
+    # 店舗・コース割り当て用カラム
+    store_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    course_name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    confirmed_datetime: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    store_memo: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    
     created_at: Mapped[DateTime] = mapped_column(DateTime, server_default=func.now())
 
 class ApeProfileModel(Base):
@@ -355,6 +362,12 @@ class BlacklistCreateRequest(BaseModel):
 
 class ManualMatchRequest(BaseModel):
     booking_ids: List[str]
+
+class StoreAssignRequest(BaseModel):
+    store_name: str
+    course_name: str
+    confirmed_datetime: str
+    store_memo: Optional[str] = None
 
 class AIWebhookReceiveRequest(BaseModel):
     event_type: str
@@ -644,6 +657,7 @@ def get_bookings(db: Session = Depends(get_db), _: bool = Depends(verify_admin))
         "gender": b.gender, "age": b.age, "area": b.area, "datetime": b.preferred_datetime,
         "area_2": b.area_2, "datetime_2": b.datetime_2, "primary_type": b.primary_type,
         "status": b.status, "group_id": b.group_id,
+        "store_name": b.store_name, "course_name": b.course_name, "confirmed_datetime": b.confirmed_datetime,
         "created_at": b.created_at.strftime("%Y-%m-%d %H:%M") if b.created_at else None
     } for b in bookings]
 
@@ -659,9 +673,41 @@ def get_matchings(db: Session = Depends(get_db), _: bool = Depends(verify_admin)
             groups_dict[b.group_id].append({
                 "booking_id": b.booking_id, "user_id": b.user_id, "name": b.name,
                 "gender": b.gender, "age": b.age, "area": b.area, "datetime": b.preferred_datetime,
-                "primary_type": b.primary_type
+                "primary_type": b.primary_type,
+                "store_name": b.store_name, "course_name": b.course_name, "confirmed_datetime": b.confirmed_datetime
             })
     return [{"group_id": g_id, "members": members} for g_id, members in groups_dict.items()]
+
+@app.post("/api/matchings/{group_id}/store")
+def assign_group_store(group_id: str, req: StoreAssignRequest, db: Session = Depends(get_db), _: bool = Depends(verify_admin)):
+    bookings = db.scalars(select(BookingModel).where(BookingModel.group_id == group_id)).all()
+    if not bookings:
+        raise HTTPException(status_code=404, detail="対象のグループが見つかりません")
+    
+    for b in bookings:
+        b.store_name = req.store_name
+        b.course_name = req.course_name
+        b.confirmed_datetime = req.confirmed_datetime
+        if req.store_memo:
+            b.store_memo = req.store_memo
+            
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"店舗情報の保存に失敗しました: {str(e)}")
+
+    # メンバーへLINE通知送信
+    for b in bookings:
+        if b.user_id and b.user_id.startswith("U"):
+            dt_str = req.confirmed_datetime.replace('T', ' ')
+            msg = f"📍 【お食事会 開催店舗決定のお知らせ】\n\n{b.name} 様\nお待たせいたしました！開催店舗が決定しました。\n\n■ 店舗: {req.store_name}\n■ コース: {req.course_name}\n■ 確定日時: {dt_str}\n"
+            if req.store_memo:
+                msg += f"■ メモ: {req.store_memo}\n"
+            msg += "\当日はお気をつけてお越しください！"
+            send_line_notification(b.user_id, msg)
+
+    return {"status": "success", "group_id": group_id, "message": "店舗情報が正常に保存され、参加者に通知されました"}
 
 @app.post("/api/matchings/run")
 def run_matching(match_mode: str = "AUTO", _: bool = Depends(verify_admin), db: Session = Depends(get_db)):
