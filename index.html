@@ -402,25 +402,18 @@
       btnNext.addEventListener('click', goToNextQuestion);
       btnRestart.addEventListener('click', restartQuiz);
 
+      // LINE共有ボタン処理（外部ブラウザ・PC環境へのフォールバック付き）
       if (btnShareLine) {
         btnShareLine.addEventListener('click', async () => {
-          if (typeof liff === 'undefined' || window.liffLoadError) {
-            alert('LINEアプリ内でご利用いただくか、ネットワーク接続をご確認ください。');
-            return;
-          }
+          const typeInfo = latestResult ? typeMaster[latestResult.primaryType] : typeMaster['GORILLA'];
+          const shareMessage = `【類人猿タイプ診断】\n私の診断結果は【${typeInfo.name}】（${typeInfo.catchphrase}）でした！\n\n診断はこちらから試してみてね👇\n${window.location.href}`;
 
-          if (!liff.isLoggedIn()) {
-            liff.login();
-            return;
-          }
-
-          if (liff.isApiAvailable('shareTargetPicker')) {
+          if (typeof liff !== 'undefined' && !window.liffLoadError && liff.isLoggedIn() && liff.isApiAvailable('shareTargetPicker')) {
             try {
-              const typeInfo = latestResult ? typeMaster[latestResult.primaryType] : typeMaster['GORILLA'];
               const res = await liff.shareTargetPicker([
                 {
                   type: 'text',
-                  text: `【類人猿タイプ診断】\n私の診断結果は【${typeInfo.name}】（${typeInfo.catchphrase}）でした！\n\n診断はこちらから試してみてね👇\n${window.location.href}`
+                  text: shareMessage
                 }
               ]);
               if (res) alert('LINEの友達に共有しました！');
@@ -428,7 +421,9 @@
               console.error('TargetPicker送信エラー:', error);
             }
           } else {
-            alert('LINE Developerで Share Target Picker を有効化してください。');
+            // PCや通常のWebブラウザの場合
+            const lineUrl = `https://line.me/R/share?text=${encodeURIComponent(shareMessage)}`;
+            window.open(lineUrl, '_blank');
           }
         });
       }
@@ -532,7 +527,7 @@
             body: JSON.stringify(bookingData)
           });
           
-          let resData = { booking_id: 'LOCAL-' + Math.random().toString(36).substring(2, 7).toUpperCase() };
+          let resData = { booking_id: 'LOCAL-' + Math.random().toString(36).substring(2, 7).URI.toUpperCase() };
           if (response.ok) {
             resData = await response.json();
           }
