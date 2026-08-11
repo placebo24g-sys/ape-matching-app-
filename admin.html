@@ -413,7 +413,7 @@
 
             <div class="pt-4 mt-4 border-t border-slate-100 flex justify-between items-center">
               ${hasVenue ? `
-                <button onclick="openVenueModal('${escapeHtml(g.group_id)}', '${escapeHtml(g.venue_name)}', '${escapeHtml(g.venue_course)}', '${escapeHtml(g.venue_datetime)}', '${escapeHtml(g.venue_notes)}') " class="text-xs text-indigo-600 hover:underline font-bold">
+                <button onclick="openVenueModal('${escapeHtml(g.group_id)}', '${escapeHtml(g.venue_name)}', '${escapeHtml(g.venue_course)}', '${escapeHtml(g.venue_datetime)}', '${escapeHtml(g.venue_notes)}')" class="text-xs text-indigo-600 hover:underline font-bold">
                   <i class="fa-solid fa-pen-to-square"></i> 店舗情報を編集
                 </button>
               ` : '<span></span>'}
@@ -429,6 +429,28 @@
         container.innerHTML = `<p class="col-span-2 text-center text-red-500 p-8"><i class="fa-solid fa-triangle-exclamation mr-2"></i>エラーが発生しました。</p>`;
       }
     }
+
+    // グループの解散
+    window.cancelGroup = async function(groupId) {
+      if (!confirm(`グループ [ ${groupId} ] を解散・リセットしますか？\nメンバーのマッチングステータスが元に戻ります。`)) return;
+      
+      const password = getSavedPassword();
+      try {
+        const response = await fetch(`${API_BASE}/matchings/${groupId}`, {
+          method: 'DELETE',
+          headers: { 'X-Admin-Password': password }
+        });
+        if (response.ok) {
+          alert('グループを解散しました');
+          fetchGroups();
+          fetchBookings();
+        } else {
+          alert('解散処理に失敗しました');
+        }
+      } catch (e) {
+        alert('通信エラーが発生しました');
+      }
+    };
 
     // --- 店舗割り当てモーダル処理 ---
     const venueModal = document.getElementById('venue-modal');
@@ -517,7 +539,36 @@
     document.getElementById('btn-close-manual').addEventListener('click', () => document.getElementById('manual-modal').classList.add('hidden'));
     document.getElementById('btn-cancel-manual').addEventListener('click', () => document.getElementById('manual-modal').classList.add('hidden'));
 
-    // ブラックリスト機能・自動マッチング・ログイン制御などは従来通り保持
+    // 自動マッチング実行
+    document.getElementById('btn-run-match').addEventListener('click', async () => {
+      const mode = document.getElementById('match-mode-select').value;
+      if (!confirm(`モード [ ${mode === 'BALANCE' ? 'バランス重視' : '同タイプ重視'} ] で自動マッチングを実行しますか？`)) return;
+
+      const password = getSavedPassword();
+      try {
+        const response = await fetch(`${API_BASE}/matchings/auto`, {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'X-Admin-Password': password 
+          },
+          body: JSON.stringify({ mode })
+        });
+
+        if (response.ok) {
+          const resData = await response.json();
+          alert(`自動マッチングが完了しました！\n生成グループ数: ${resData.created_count || 0}`);
+          fetchBookings();
+          fetchGroups();
+        } else {
+          alert('自動マッチング処理に失敗しました');
+        }
+      } catch (e) {
+        alert('通信エラーが発生しました');
+      }
+    });
+
+    // ブラックリスト機能
     async function fetchBlacklist() {
       const password = getSavedPassword();
       if (!password) return showLogin();
@@ -550,6 +601,49 @@
       }
     }
 
+    document.getElementById('add-blacklist-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const password = getSavedPassword();
+      const userId = document.getElementById('bl-user-id').value.trim();
+      const reason = document.getElementById('bl-reason').value.trim();
+
+      try {
+        const response = await fetch(`${API_BASE}/admin/blacklist`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Admin-Password': password },
+          body: JSON.stringify({ user_id: userId, reason })
+        });
+        if (response.ok) {
+          alert('ブラックリストに追加しました');
+          document.getElementById('bl-user-id').value = '';
+          document.getElementById('bl-reason').value = '';
+          fetchBlacklist();
+        } else {
+          alert('追加に失敗しました');
+        }
+      } catch (err) {
+        alert('エラーが発生しました');
+      }
+    });
+
+    window.removeBlacklist = async function(userId) {
+      if (!confirm(`ユーザー [ ${userId} ] をブラックリストから解除しますか？`)) return;
+      const password = getSavedPassword();
+      try {
+        const response = await fetch(`${API_BASE}/admin/blacklist/${userId}`, {
+          method: 'DELETE',
+          headers: { 'X-Admin-Password': password }
+        });
+        if (response.ok) {
+          fetchBlacklist();
+        } else {
+          alert('解除に失敗しました');
+        }
+      } catch (err) {
+        alert('エラーが発生しました');
+      }
+    };
+
     document.getElementById('btn-submit-manual').addEventListener('click', async () => {
       const selectedCheckboxes = document.querySelectorAll('.manual-user-checkbox:checked');
       const selectedIds = Array.from(selectedCheckboxes).map(cb => cb.value);
@@ -568,6 +662,8 @@
           document.getElementById('manual-modal').classList.add('hidden');
           fetchBookings();
           fetchGroups();
+        } else {
+          alert('手動グループ作成に失敗しました');
         }
       } catch (e) {
         alert('エラーが発生しました');
@@ -617,9 +713,13 @@
       else fetchBlacklist();
     });
 
-    document.addEventListener('DOMContentLoaded', () => {
-      if (getSavedPassword()) fetchBookings();
-      else showLogin();
+    // 初期化チェック
+    window.addEventListener('DOMContentLoaded', () => {
+      if (getSavedPassword()) {
+        fetchBookings();
+      } else {
+        showLogin();
+      }
     });
   </script>
 </body>
